@@ -1,0 +1,14 @@
+﻿using System.Configuration;
+using System.Data;
+using System.Windows;
+
+namespace ImageEditorApp
+{
+	public partial class App : Application
+	{
+		public static IServiceProvider ServiceProvider { get; private set; } = null!;
+
+
+	}
+
+}

@@ -1,0 +1,365 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<!-- 
+		Microsoft ResX Schema
+
+		Version 1.3
+
+		The primary goals of this format is to allow a simple XML format 
+		that is mostly human readable. The generation and parsing of the 
+		various data types are done through the TypeConverter classes 
+		associated with the data types.
+
+		Example:
+
+		... ado.net/XML headers & schema ...
+		<resheader name="resmimetype">text/microsoft-resx</resheader>
+		<resheader name="version">1.3</resheader>
+		<resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+		<resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+		<data name="Name1">this is my long string</data>
+		<data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+		<data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+			[base64 mime encoded serialized .NET Framework object]
+		</data>
+		<data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+			[base64 mime encoded string representing a byte array form of the .NET Framework object]
+		</data>
+
+		There are any number of "resheader" rows that contain simple 
+		name/value pairs.
+
+		Each data row contains a name, and value. The row also contains a 
+		type or mimetype. Type corresponds to a .NET class that support 
+		text/value conversion through the TypeConverter architecture. 
+		Classes that don't support this are serialized and stored with the 
+		mimetype set.
+
+		The mimetype is used for serialized objects, and tells the 
+		ResXResourceReader how to depersist the object. This is currently not 
+		extensible. For a given mimetype the value must be set accordingly:
+
+		Note - application/x-microsoft.net.object.binary.base64 is the format 
+		that the ResXResourceWriter will generate, however the reader can 
+		read any of the formats listed below.
+
+		mimetype: application/x-microsoft.net.object.binary.base64
+		value   : The object must be serialized with 
+			: System.Serialization.Formatters.Binary.BinaryFormatter
+			: and then encoded with base64 encoding.
+
+		mimetype: application/x-microsoft.net.object.soap.base64
+		value   : The object must be serialized with 
+			: System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+			: and then encoded with base64 encoding.
+
+		mimetype: application/x-microsoft.net.object.bytearray.base64
+		value   : The object must be serialized into a byte array 
+			: using a System.ComponentModel.TypeConverter
+			: and then encoded with base64 encoding.
+	-->
+	
+	<xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+		<xsd:element name="root" msdata:IsDataSet="true">
+			<xsd:complexType>
+				<xsd:choice maxOccurs="unbounded">
+					<xsd:element name="data">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+								<xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" msdata:Ordinal="1" />
+							<xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+							<xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="resheader">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" use="required" />
+						</xsd:complexType>
+					</xsd:element>
+				</xsd:choice>
+			</xsd:complexType>
+		</xsd:element>
+	</xsd:schema>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>1.3</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.3500.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.3500.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+        <data name="formName" xml:space="preserve">
+                <value>Редактор изображений документов</value>
+        </data>
+        <data name="deletePageName" xml:space="preserve">
+                <value>Удалить страницу</value>
+        </data>
+        <data name="colorizeName" xml:space="preserve">
+                <value>Цвет</value>
+        </data>
+        <data name="bwName" xml:space="preserve">
+                <value>Ч/Б</value>
+        </data>
+        <data name="grayName" xml:space="preserve">
+                <value>Оттенки серого</value>
+        </data>
+        <data name="rotateRName" xml:space="preserve">
+                <value>Повернуть на 90˚ вправо</value>
+        </data>
+        <data name="rotateLName" xml:space="preserve">
+                <value>Повернуть на 90˚ влево</value>
+        </data>
+        <data name="flipXName" xml:space="preserve">
+                <value>Отразить оригинал горизонтально</value>
+        </data>
+        <data name="flipYName" xml:space="preserve">
+                <value>Отразить оригинал вертикально</value>
+        </data>
+        <data name="cropName" xml:space="preserve">
+                <value>Обрезать</value>
+        </data>
+        <data name="uncropName" xml:space="preserve">
+                <value>Отменить обрезку</value>
+        </data>
+        <data name="fitToSelectionName" xml:space="preserve">
+                <value>Масштаб по выделению</value>
+        </data>
+        <data name="hasNotesName" xml:space="preserve">
+                <value>Есть заметки</value>
+        </data>
+        <data name="setStampOnLocationName" xml:space="preserve">
+                <value>Поставить простой штамп</value>
+        </data>
+        <data name="setStampFullImageName" xml:space="preserve">
+                <value>Поставить штамп на всё изображение</value>
+        </data>
+        <data name="setStampFitToImageName" xml:space="preserve">
+                <value>Поставить большой штамп</value>
+        </data>
+        <data name="removeStampName" xml:space="preserve">
+                <value>Удалить штамп</value>
+        </data>
+        <data name="removeAnnotationName" xml:space="preserve">
+                <value>Удалить заметку</value>
+        </data>
+        <data name="editAnnotationName" xml:space="preserve">
+                <value>Редактировать заметку</value>
+        </data>
+        <data name="setMarkerAnnotationName" xml:space="preserve">
+                <value>Добавить заметку-маркер</value>
+        </data>
+        <data name="setFrameAnnotationName" xml:space="preserve">
+                <value>Добавить заметку-рамку</value>
+        </data>
+        <data name="setSimpleTextAnnotationName" xml:space="preserve">
+                <value>Добавить заметку-текст</value>
+        </data>
+        <data name="setTextWithBackgroundAnnotationName" xml:space="preserve">
+                <value>Добавить заметку-текст с фоном</value>
+        </data>
+        <data name="okName" xml:space="preserve">
+                <value>ОК</value>
+        </data>
+        <data name="cancelName" xml:space="preserve">
+                <value>Отмена</value>
+        </data>
+        <data name="colorName" xml:space="preserve">
+                <value>Цвет</value>
+        </data>
+        <data name="chooseColorName" xml:space="preserve">
+                <value>Выбор цвета</value>
+        </data>
+        <data name="chooseTextName" xml:space="preserve">
+                <value>Выбор текста</value>
+        </data>
+        <data name="textColorName" xml:space="preserve">
+                <value>Цвет текста</value>
+        </data>
+        <data name="backColorName" xml:space="preserve">
+                <value>Цвет фона</value>
+        </data>
+        <data name="fontName" xml:space="preserve">
+                <value>Шрифт</value>
+        </data>
+        <data name="chooseFrameName" xml:space="preserve">
+                <value>Выбор рамки</value>
+        </data>
+        <data name="keepAnnotationsName" xml:space="preserve">
+                <value>С заметками</value>
+        </data>
+        <data name="loseAnnotationsName" xml:space="preserve">
+                <value>Без заметок</value>
+        </data>
+        <data name="burnAnnotationsName" xml:space="preserve">
+                <value>С внедрёнными заметками</value>
+        </data>
+        <data name="physicalSizeName" xml:space="preserve">
+                <value>По физическому размеру</value>
+        </data>
+        <data name="fitToWindowName" xml:space="preserve">
+                <value>По окну</value>
+        </data>
+        <data name="fitToHeightName" xml:space="preserve">
+                <value>По высоте</value>
+        </data>
+        <data name="fitToWidthName" xml:space="preserve">
+                <value>По ширине</value>
+        </data>
+        <data name="loseStampsName" xml:space="preserve">
+                <value>Без штампов</value>
+        </data>
+        <data name="burnStampsName" xml:space="preserve">
+                <value>Со штампами</value>
+        </data>
+        <data name="shiftPageDownName" xml:space="preserve">
+                <value>Страница вниз</value>
+        </data>
+        <data name="shiftPageUpName" xml:space="preserve">
+                <value>Страница вверх</value>
+        </data>
+        <data name="addExtraFileBeforeThisPageName" xml:space="preserve">
+                <value>Добавить файл перед этой страницей</value>
+        </data>
+        <data name="documentNameName" xml:space="preserve">
+                <value>Имя документа</value>
+        </data>
+        <data name="changeDocumentNameName" xml:space="preserve">
+                <value>Изменить имя документа</value>
+        </data>
+        <data name="returnToOriginDocumentNameName" xml:space="preserve">
+                <value>Вернуть стандартное имя документа</value>
+        </data>
+        <data name="attentionName" xml:space="preserve">
+                <value>Внимание</value>
+        </data>
+        <data name="cannotSaveName" xml:space="preserve">
+                <value>Вы не можете сохранить файл при данных условиях.</value>
+        </data>
+        <data name="savePlainImageName" xml:space="preserve">
+                <value>Вы пытаетесь сохранить файл не как tif или pdf. Все изменения будут потеряны. Продолжить?</value>
+        </data>
+        <data name="fileExistsName" xml:space="preserve">
+                <value>Такой файл уже существует. Переписать?</value>
+        </data>
+        <data name="applyToName" xml:space="preserve">
+                <value>Применить к</value>
+        </data>
+        <data name="applyChangesToName" xml:space="preserve">
+                <value>Применить изменения</value>
+        </data>
+        <data name="pagesName" xml:space="preserve">
+                <value>ко всем страницам документа</value>
+        </data>
+        <data name="documentsName" xml:space="preserve">
+                <value>ко всем документам</value>
+        </data>
+        <data name="documentTitleName" xml:space="preserve">
+                <value>Документ:</value>
+        </data>
+        <data name="pageTitleName" xml:space="preserve">
+                <value>Страница:</value>
+        </data>
+        <data name="annotationAddedName" xml:space="preserve">
+                <value>Добавлена заметка</value>
+        </data>
+        <data name="annotationEditedName" xml:space="preserve">
+                <value>Изменена заметка</value>
+        </data>
+        <data name="annotationRemovedName" xml:space="preserve">
+                <value>Удалена заметка</value>
+        </data>
+        <data name="extraModelAddedName" xml:space="preserve">
+                <value>Добавлен файл</value>
+        </data>
+        <data name="documentNameChangedName" xml:space="preserve">
+                <value>Изменено имя документа</value>
+        </data>
+        <data name="pageDeletedName" xml:space="preserve">
+                <value>Удалена страница</value>
+        </data>
+        <data name="pagesDeletedMultipleName" xml:space="preserve">
+                <value>Удалено несколько страниц</value>
+        </data>
+        <data name="pageRestoredName" xml:space="preserve">
+                <value>Восстановлена страница</value>
+        </data>
+        <data name="pagesRestoredMultipleName" xml:space="preserve">
+                <value>Восстановлено несколько страниц</value>
+        </data>
+        <data name="pageShiftedName" xml:space="preserve">
+                <value>Перемещена страница</value>
+        </data>
+        <data name="stampAddedName" xml:space="preserve">
+                <value>Добавлен штамп</value>
+        </data>
+        <data name="stampEditedName" xml:space="preserve">
+                <value>Изменён штамп</value>
+        </data>
+        <data name="stampRemovedName" xml:space="preserve">
+                <value>Удалён штамп</value>
+        </data>
+        <data name="undoName" xml:space="preserve">
+                <value>Отменить:</value>
+        </data>
+        <data name="redoName" xml:space="preserve">
+                <value>Вернуть:</value>
+        </data>
+        <data name="zoomInName" xml:space="preserve">
+                <value>Приблизить</value>
+        </data>
+        <data name="zoomOutName" xml:space="preserve">
+                <value>Отдалить</value>
+        </data>
+        <data name="previousPageName" xml:space="preserve">
+                <value>Предыдущая страница</value>
+        </data>
+        <data name="nextPageName" xml:space="preserve">
+                <value>Следующая страница</value>
+        </data>
+        <data name="cannotAddNoImageName" xml:space="preserve">
+                <value>Невозможно добавить не изображение</value>
+        </data>
+        <data name="selectFragmentName" xml:space="preserve">
+                <value>Выбрать фрагмент</value>
+        </data>
+        <data name="cannotWriteToDirectoryName" xml:space="preserve">
+                <value>Вы не можете сохранять файлы в эту папку</value>
+        </data>
+        <data name="showThumbnailsName" xml:space="preserve">
+                <value>Отображать панель страниц</value>
+        </data>
+        <data name="addToSelectionMultipleName" xml:space="preserve">
+                <value>Добавить страницу в выбор</value>
+        </data>
+        <data name="removeFromSelectionMultipleName" xml:space="preserve">
+                <value>Убрать страницу из выбора</value>
+        </data>
+        <data name="copyPageTextName" xml:space="preserve">
+                <value>Копировать текст страницы</value>
+        </data>
+        <data name="noTextName" xml:space="preserve">
+                <value>На странице нет текста</value>
+        </data>
+        <data name="textIsExtractingName" xml:space="preserve">
+                <value>Извлекается текст…</value>
+        </data>
+        <data name="buildingImageModelName" xml:space="preserve">
+                <value>Построение модели документа</value>
+        </data>
+        <data name="readingFileName" xml:space="preserve">
+                <value>Чтение файла</value>
+        </data>
+        <data name="savingImageModelName" xml:space="preserve">
+                <value>Сохранение в файл</value>
+        </data>
+</root>

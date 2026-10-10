@@ -1,0 +1,475 @@
+ReadWriteDrawExtensions.cs
+
+public static void ReadPageForAction(this PageModel pm, Action<BitmapSource> action, bool forThumbnail = false)
+{
+	if (action is null)
+	{
+		return;
+	}
+
+	try
+	{
+		if (pm.ImageModelParent.SourceType == SourceType.ImagesSource)
+		{
+			var pageImage = pm.ImageModelParent.ScanPagesInitial[pm.PageNumberInitial];
+			action(pageImage);
+		}
+		else if (pm.ImageFileFormatOrigin == ImageFileFormat.Pdf)
+		{
+			var dpx = forThumbnail ? pm.DpiXThumbnail : pm.DpiX;
+			var dpy = forThumbnail ? pm.DpiYThumbnail : pm.DpiY;
+			double scalingFactor = dpx / 72.0;
+			var dimensions = new PageDimensions(scalingFactor);
+			using var docReader = DocLib.Instance.GetDocReader(pm.ImageModelParent.FileBytes, dimensions);
+			using var pageReader = docReader.GetPageReader(pm.PageNumberInitial);
+			int width = pageReader.GetPageWidth();
+			int height = pageReader.GetPageHeight();
+			byte[] rawPixels = forThumbnail ? pageReader.GetImage() : pageReader.GetImage(RenderFlags.RenderAnnotations);
+			var bitmap = new WriteableBitmap(width, height, dpx, dpy, PixelFormats.Bgra32, null);
+			bitmap.Lock();
+
+			try
+			{
+				Marshal.Copy(rawPixels, 0, bitmap.BackBuffer, rawPixels.Length);
+				bitmap.AddDirtyRect(new Int32Rect(0, 0, width, height));
+			}
+			finally
+			{
+				bitmap.Unlock();
+			}
+
+			bitmap.Freeze();
+
+			action(bitmap);
+		}
+		else if (pm.ImageFileFormatOrigin == ImageFileFormat.Tiff || pm.IsPlainImage)
+		{
+			using Stream ms0 = new MemoryStream(pm.ImageModelParent.FileBytes);
+			var decoder = ms0.GetDecoderForTiffAndPlainImage(pm.ImageFileFormatOrigin);
+			var frame = decoder.Frames[pm.PageNumberInitial];
+
+			using MemoryStream ms = new MemoryStream();
+			BmpBitmapEncoder encoder = new BmpBitmapEncoder();
+			encoder.Frames.Add(frame);
+			encoder.Save(ms);
+			ms.Position = 0;
+
+			BitmapImage finalBitmap = new BitmapImage();
+			finalBitmap.BeginInit();
+			finalBitmap.CacheOption = BitmapCacheOption.OnLoad; // Выкачиваем в ОЗУ мгновенно
+			finalBitmap.StreamSource = ms;
+			finalBitmap.EndInit();
+			finalBitmap.Freeze();
+
+			action(finalBitmap);
+		}
+	}
+	catch (Exception ex)
+	{
+		throw;
+	}
+}
+
+PageModel.cs
+
+public void BuildBitmapThumbnail()
+{
+	if (!(isGenerating || (thumbnailHasBeenCreated && !thumbnailNeedToBeUpdated)))
+	{
+		try
+		{
+			isGenerating = true;
+			this.ReadPageForAction(image => SetBitmapThumbnail(image), true);
+			thumbnailHasBeenCreated = true;
+			thumbnailNeedToBeUpdated = false;
+			//OnPropertyChanged(NotifiedPropertyType.BitmapThumbnail);//уже есть в SetBitmapThumbnail
+		}
+		catch (Exception ex)
+		{
+			logger?.LogException(ex, "Couldn't get BitmapThumbnail");
+		}
+		finally
+		{
+			isGenerating = false;
+		}
+	}
+}
+
+public void SetBitmapThumbnail(BitmapSource source)
+{
+	if (source is BitmapSource bitmapSource)
+	{
+		try
+		{
+			var ths = GetFitSize(ImageModel.ThumbnailSize, heightMMOrigin / widthMMOrigin);
+			var kx = ths.Width / source.PixelWidth;
+			var ky = ths.Height / source.PixelHeight;
+			var transformedBitmap = new TransformedBitmap(source, new ScaleTransform(kx, ky));
+
+			if (ColorizeTypeChosen != ColorizeType.Colorize)
+			{
+				FormatConvertedBitmap convertedBitmap = new FormatConvertedBitmap();
+				convertedBitmap.BeginInit();
+				convertedBitmap.Source = transformedBitmap;
+				convertedBitmap.DestinationFormat = ColorizeTypeChosen == ColorizeType.Gray ? PixelFormats.Gray8 : PixelFormats.BlackWhite;
+				convertedBitmap.EndInit();
+				convertedBitmap.Freeze();
+
+				bitmapThumbnail = convertedBitmap;
+			}
+			else
+			{
+				bitmapThumbnail = transformedBitmap;
+			}
+
+			bitmapThumbnail.Freeze();
+		}
+		catch (Exception ex)
+		{
+			bitmapThumbnail = null;
+			logger.LogException(ex, "Couldn't get BitmapThumbnail");
+		}
+		finally 
+		{
+			OnPropertyChanged(NotifiedPropertyType.BitmapThumbnail);
+		}
+	}
+}
+
+
+ImageEditor.cs
+
+private Action<CancellationToken, IProgress<(int, ImageOperationID)>, ImageOperationID> BuildBitmapThumbnailAction(PageModel pm) =>
+	(ct, ip, id) => pm.BuildBitmapThumbnail();
+
+private void RenderThumbnail(PageModel pm)
+{
+	if (
+		VisualTreeHelper.GetChildrenCount(listViewThumbnails) > 0 &&
+		VisualTreeHelper.GetChild(listViewThumbnails, 0) is Decorator d &&
+		d.Child is ScrollViewer scrollViewer)
+	{
+		if (thumbnailsWidthCached <= 0)
+		{
+			RecalculateThumbnailsTileSizes();
+		}
+
+		// переводим пиксели VerticalOffset в номер строки, делим физический сдвиг в пикселях на физическую высоту одной плитки
+		int firstVisibleRow = (int)Math.Floor(scrollViewer.VerticalOffset / thumbnailsHeightCached);
+
+		// считаем количество видимых строк на экране
+		int visibleRowsCount = (int)Math.Ceiling(scrollViewer.ViewportHeight / thumbnailsHeightCached);
+
+		// рассчитываем реальные индексы в массиве данных (с запасом на 2 строки)
+		int firstVisibleIdx = (firstVisibleRow - 2) * thumbnailsPerRowChched;
+		int lastVisibleIdx = (firstVisibleRow + visibleRowsCount + 2) * thumbnailsPerRowChched;
+
+		firstVisibleIdx = Math.Max(0, firstVisibleIdx);
+		lastVisibleIdx = Math.Min(listViewThumbnails.Items.Count - 1, lastVisibleIdx);
+
+		if (imageModelCurrent is ImageModel im)
+		{
+			for (int i = firstVisibleIdx; i <= lastVisibleIdx; i++)
+			{
+				if (listViewThumbnails.Items[i] == pm)
+				{
+					var comment = $"{pm?.ImageModelParent?.DocumentNameChosen} {pm?.PageNumberInitial}";
+					var id = new ImageOperationID(ImageOperationType.BuildThumbnail, comment);
+					var key = new ChainKey(new Guid(), $"{ImageOperationType.BuildThumbnail}");
+					_ = editorDispatcher.EnqueueParallel(
+						key, GetDispatched(BuildBitmapThumbnailAction(pm), id));
+
+					return;
+				}
+			}
+		}
+	}
+}
+
+private void RenderThumbnails()
+{
+	if (
+		VisualTreeHelper.GetChildrenCount(listViewThumbnails) > 0 &&
+		VisualTreeHelper.GetChild(listViewThumbnails, 0) is Decorator d &&
+		d.Child is ScrollViewer scrollViewer)
+	{
+		if (thumbnailsWidthCached <= 0)
+		{
+			RecalculateThumbnailsTileSizes();
+		}
+
+		// переводим пиксели VerticalOffset в номер строки, делим физический сдвиг в пикселях на физическую высоту одной плитки
+		int firstVisibleRow = (int)Math.Floor(scrollViewer.VerticalOffset / thumbnailsHeightCached);
+
+		// считаем количество видимых строк на экране
+		int visibleRowsCount = (int)Math.Ceiling(scrollViewer.ViewportHeight / thumbnailsHeightCached);
+
+		// рассчитываем реальные индексы в массиве данных (с запасом на 2 строки)
+		int firstVisibleIdx = (firstVisibleRow - 2) * thumbnailsPerRowChched;
+		int lastVisibleIdx = (firstVisibleRow + visibleRowsCount + 2) * thumbnailsPerRowChched;
+
+		firstVisibleIdx = Math.Max(0, firstVisibleIdx);
+		lastVisibleIdx = Math.Min(listViewThumbnails.Items.Count - 1, lastVisibleIdx);
+
+		if (imageModelCurrent is ImageModel im)
+		{
+			for (int i = firstVisibleIdx; i <= lastVisibleIdx; i++)
+			{
+				if (listViewThumbnails.Items[i] is PageModel pm)
+				{
+					var comment = $"{pm?.ImageModelParent?.DocumentNameChosen} {pm?.PageNumberInitial}";
+					var id = new ImageOperationID(ImageOperationType.BuildThumbnail, comment);
+					var key = new ChainKey(new Guid(), $"{ImageOperationType.BuildThumbnail}");
+					_ = editorDispatcher.EnqueueParallel(
+						key, GetDispatched(BuildBitmapThumbnailAction(pm), id));
+				}
+			}
+		}
+	}
+}
+
+private void RecalculateThumbnailsTileSizes()
+{
+	if (listViewThumbnails is ListView lv && lv.Items.Count > 0 && lv.ActualWidth > 0)
+	{
+		// Пытаемся найти первый живой контейнер на экране для замера
+		for (int k = 0; k < lv.Items.Count; k++)
+		{
+			if (lv.ItemContainerGenerator.ContainerFromIndex(k) is ListViewItem lvi && lvi.ActualWidth > 0)
+			{
+				Thickness margin = lvi.Margin;
+				thumbnailsWidthCached = lvi.ActualWidth + margin.Left + margin.Right;
+				thumbnailsHeightCached = lvi.ActualHeight + margin.Top + margin.Bottom;
+
+				if (VisualTreeHelper.GetChildrenCount(lv) > 0)
+				{
+					var border = VisualTreeHelper.GetChild(lv, 0) as Decorator;
+					var scrollViewer = border?.Child as ScrollViewer;
+
+					if (scrollViewer != null)
+					{
+						thumbnailsPerRowChched = Math.Max(1, (int)(scrollViewer.ViewportWidth / thumbnailsWidthCached));
+					}
+					else
+					{
+						thumbnailsPerRowChched = Math.Max(1, (int)(lv.ActualWidth / thumbnailsWidthCached));
+					}
+				}
+				else
+				{
+					thumbnailsPerRowChched = Math.Max(1, (int)(lv.ActualWidth / thumbnailsWidthCached));
+				}
+
+				break;
+			}
+		}
+	}
+}
+
+private void BindingListViewThumbnails(ImageModel im)
+{
+	if (im == null || im.PagesAll == null || im.PagesAll.Count == 0)
+	{
+		listViewThumbnails.ItemsSource = null;
+		return;
+	}
+
+	timerThumbnailDrawing.Stop();
+	listViewThumbnails.ItemsSource = im.PagesAll;
+
+	// 2. Получаем стандартное представление (View) для этой конкретной коллекции
+	// WPF автоматически кэширует его, это не ломает виртуализацию
+	ICollectionView view = CollectionViewSource.GetDefaultView(im.PagesAll);
+
+	// Условие 1: Фильтрация удаленных страниц
+	view.Filter = (obj) => obj is PageModel page && !page.IsDeleted;
+	view.SortDescriptions.Clear();
+
+	// Условие 2: Сортировка по текущему индексу
+	view.SortDescriptions.Add(new SortDescription($"{NotifiedPropertyType.PageNumberCurrent}", ListSortDirection.Ascending));
+	view.Refresh();
+
+	// Даем WPF один такт процессора, чтобы обновить разметку (Layout), 
+	// после чего принудительно подгружаем миниатюры для первых видимых страниц
+	listViewThumbnails.Dispatcher.InvokeAsync(RenderThumbnails, DispatcherPriority.Background);
+}
+
+private void BindNewImageModel(ImageModel newImageModel)
+{
+	imageModelCurrent = newImageModel;
+	SetPageModelCurrent(imageModelCurrent);
+	this.DataContext = newImageModel;
+	BindingListViewThumbnails(newImageModel);
+	BindingLabelDocumentName(newImageModel);
+}
+
+private void SetupListViewThumbnails()
+{
+	VirtualizingPanel.SetIsVirtualizing(listViewThumbnails, true);
+	VirtualizingPanel.SetVirtualizationMode(listViewThumbnails, VirtualizationMode.Standard);
+
+	FrameworkElementFactory panelFactory = new FrameworkElementFactory(typeof(VirtualizingWrapPanel));
+	listViewThumbnails.ItemsPanel = new ItemsPanelTemplate(panelFactory);
+
+	ScrollViewer.SetHorizontalScrollBarVisibility(listViewThumbnails, ScrollBarVisibility.Disabled);
+	ScrollViewer.SetVerticalScrollBarVisibility(listViewThumbnails, ScrollBarVisibility.Auto);
+
+	FrameworkElementFactory borderFactory = new FrameworkElementFactory(typeof(Border));
+	borderFactory.SetValue(Border.BorderThicknessProperty, new Thickness(2));
+	borderFactory.SetValue(Border.BorderBrushProperty, Brushes.Transparent); // По умолчанию рамка невидима
+	borderFactory.SetValue(Border.BackgroundProperty, Brushes.Transparent);
+	borderFactory.SetValue(Border.PaddingProperty, thicknessStandard);
+
+	FrameworkElementFactory gridFactory = new FrameworkElementFactory(typeof(Grid));
+	FrameworkElementFactory pictureRow = new FrameworkElementFactory(typeof(RowDefinition));
+	pictureRow.SetValue(RowDefinition.HeightProperty, new GridLength(1, GridUnitType.Star));
+	FrameworkElementFactory textRow = new FrameworkElementFactory(typeof(RowDefinition));
+	textRow.SetValue(RowDefinition.HeightProperty, GridLength.Auto);
+	gridFactory.AppendChild(pictureRow);
+	gridFactory.AppendChild(textRow);
+
+	borderFactory.AppendChild(gridFactory);
+
+	FrameworkElementFactory mainImageFactory = new FrameworkElementFactory(typeof(Image));
+	mainImageFactory.SetValue(Image.WidthProperty, ImageModel.ThumbnailSize.Width);
+	mainImageFactory.SetValue(Image.HeightProperty, ImageModel.ThumbnailSize.Height);
+	mainImageFactory.SetValue(Image.StretchProperty, Stretch.Uniform);
+	mainImageFactory.SetValue(Image.StretchProperty, Stretch.Uniform);
+	mainImageFactory.SetValue(FrameworkElement.NameProperty, $"{NotifiedPropertyType.BitmapThumbnail}");
+	mainImageFactory.SetValue(UIElement.SnapsToDevicePixelsProperty, true);
+	mainImageFactory.SetValue(RenderOptions.EdgeModeProperty, EdgeMode.Aliased);
+	mainImageFactory.SetValue(RenderOptions.BitmapScalingModeProperty, BitmapScalingMode.LowQuality);
+	mainImageFactory.SetValue(Grid.RowProperty, 0);
+
+	mainImageFactory.SetValue(UIElement.RenderTransformOriginProperty, new Point(0.5, 0.5));
+	Binding rotateBinding = new Binding($"{NotifiedPropertyType.RotateFlipType}")
+	{
+		Converter = new RotateFlipToTransformConverter(), // Наш конвертер из прошлого шага
+		Mode = BindingMode.OneWay
+	};
+
+	mainImageFactory.SetBinding(UIElement.RenderTransformProperty, rotateBinding);
+	mainImageFactory.SetBinding(Image.SourceProperty, new Binding($"{NotifiedPropertyType.BitmapThumbnail}"));
+
+	gridFactory.AppendChild(mainImageFactory);
+
+	FrameworkElementFactory overlayImageFactory = new FrameworkElementFactory(typeof(Image));
+	overlayImageFactory.SetValue(FrameworkElement.WidthProperty, 16.0);
+	overlayImageFactory.SetValue(FrameworkElement.HeightProperty, 16.0);
+	overlayImageFactory.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Left);
+	overlayImageFactory.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Top);
+	overlayImageFactory.SetValue(FrameworkElement.VisibilityProperty, Visibility.Collapsed);
+	overlayImageFactory.SetValue(Grid.RowProperty, 0);
+	overlayImageFactory.SetValue(Image.SourceProperty, GetBitmapFromBytes(Resource.ImageMultySelect));
+	gridFactory.AppendChild(overlayImageFactory);
+
+	FrameworkElementFactory textBlockFactory = new FrameworkElementFactory(typeof(TextBlock));
+	textBlockFactory.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Bottom);
+	textBlockFactory.SetValue(Grid.RowProperty, 1);
+
+	Binding pageNumberDisplayedBinding = new Binding()
+	{
+		Mode = BindingMode.OneWay,
+		Converter = new PageModelToStringConverter(hasNotesName),
+	};
+
+	textBlockFactory.SetBinding(TextBlock.TextProperty, pageNumberDisplayedBinding);
+	gridFactory.AppendChild(textBlockFactory);
+
+	Binding selectedSingleBorderBinding = new Binding($"{NotifiedPropertyType.IsSelectedSingle}")
+	{
+		Mode = BindingMode.OneWay,
+		Converter = new BoolToBrushConverter(SystemColors.ControlDarkBrush, Brushes.Transparent),
+	};
+
+	borderFactory.SetBinding(BorderBrushProperty, selectedSingleBorderBinding);
+
+	Binding selectedMultipleBackgroundBinding = new Binding($"{NotifiedPropertyType.IsSelectedMultiple}")
+	{
+		Mode = BindingMode.OneWay,
+		Converter = new BoolToBrushConverter(SystemColors.ControlLightBrush, Brushes.Transparent),
+	};
+
+	borderFactory.SetBinding(BackgroundProperty, selectedMultipleBackgroundBinding);
+
+	Binding selectedMultipleImageBinding = new Binding($"{NotifiedPropertyType.IsSelectedMultiple}")
+	{
+		Mode = BindingMode.OneWay,
+		Converter = new BoolToVisabilityConverter(),
+	};
+
+	overlayImageFactory.SetBinding(VisibilityProperty, selectedMultipleImageBinding);
+
+	DataTemplate itemTemplate = new DataTemplate() { VisualTree = borderFactory };
+	listViewThumbnails.ItemTemplate = itemTemplate;
+
+	#region очистка стандартного стиля выделения
+	Binding selectBinding = new Binding($"{NotifiedPropertyType.IsSelectedSingle}")
+	{
+		Mode = BindingMode.TwoWay,
+		UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
+	};
+
+	Style itemStyle = new Style(typeof(ListViewItem));
+	itemStyle.Setters.Add(new Setter(ListViewItem.IsSelectedProperty, selectBinding));
+	ControlTemplate cleanTemplate = new ControlTemplate(typeof(ListViewItem));
+	FrameworkElementFactory presenterFactory = new FrameworkElementFactory(typeof(ContentPresenter));
+	cleanTemplate.VisualTree = presenterFactory;
+	itemStyle.Setters.Add(new Setter(Control.TemplateProperty, cleanTemplate));
+	listViewThumbnails.ItemContainerStyle = itemStyle;
+	#endregion
+
+	timerThumbnailDrawing.Tick += (s, e) =>
+	{
+		timerThumbnailDrawing.Stop();
+		listViewThumbnails.Dispatcher.InvokeAsync(RenderThumbnails, DispatcherPriority.Background);
+	};
+
+	listViewThumbnails.AddHandler(
+		ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((s, e) =>
+		{
+			if (e.VerticalChange != 0)
+			{
+				RecalculateThumbnailsTileSizes();
+				timerThumbnailDrawing.Stop();
+				timerThumbnailDrawing.Start();
+			}
+		}));
+
+	listViewThumbnails.SizeChanged += (s, e) =>
+	{
+		RecalculateThumbnailsTileSizes();
+		timerThumbnailDrawing.Stop();
+		timerThumbnailDrawing.Start();
+	};
+
+	listViewThumbnails.BorderThickness = new Thickness(0);
+	listViewThumbnails.Background = Brushes.AliceBlue;
+
+	listViewThumbnails.SelectionChanged += (o, e) =>
+	{
+		var imageComposer = new StaticImageComposer()
+		{
+			ViewModel = (PageModel)listViewThumbnails.SelectedItem,
+			HorizontalAlignment = HorizontalAlignment.Left,
+			VerticalAlignment = VerticalAlignment.Top,
+		};
+
+		scrollViewerPage.Content = imageComposer;
+	};
+
+	listViewThumbnails.MouseRightButtonUp += (o, e) =>
+	{
+		if (e.OriginalSource is Image image && image.DataContext is PageModel pm0)
+		{
+			//pm.FlipX();
+
+			//var pm = pm0.ImageModelParent.PagesAll[49];
+			//pm.ColorizeTypeChosen = (ColorizeType)(((int)pm.ColorizeTypeChosen + 1) % 3);
+			//RenderThumbnail(pm);
+		}
+	};
+}
+
+
+

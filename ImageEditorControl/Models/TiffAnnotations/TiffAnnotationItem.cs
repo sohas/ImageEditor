@@ -1,0 +1,193 @@
+﻿using System.Windows;
+using System.Windows.Media;
+
+namespace ImageEditorControl.Models.TiffAnnotations
+{
+	public class TiffAnnotationItem(TiffAnnotationMarkType type)
+	{
+		#region переменные и свойства самой структуры
+		//public uint uType;     // тип, см. выше TiffAnnotationMarkType потом тоже переделать в свойство
+
+		/// <summary>
+		/// Rectangle in FULLSIZE units; equivalent to type RECT. Can be a rectangle or two points.
+		/// </summary>
+		public Rect LrBounds { get; set; } = new Rect();
+
+		/// <summary>
+		/// Rectangle in FULLSIZE units; equivalent to type RECT. Can be a rectangle or two points.
+		/// </summary>
+		public Rect LrBoundsChosen { get; set; }
+
+		/// <summary>
+		/// The main color; for example, the color of all lines, all rectangles, and standalone text.
+		/// </summary>
+		public Color RgbColor1 { get; set; } = new Color();
+
+		/// <summary>
+		/// The secondary color; for example, the color of the text of
+		/// an Attach-a-Note.
+		/// </summary>
+		public Color RgbColor2 { get; set; } = new Color();
+
+		/// <summary>
+		/// TRUE ? The mark is drawn highlighted. Highlighting
+		/// performs the same function as a highlighting marker on a
+		/// piece of paper. Valid only for lines, rectangles, and
+		/// freehand.
+		/// </summary>
+		public bool BHighlighting { get; set; } = false;
+
+		/// <summary>
+		/// TRUE ? The mark is drawn transparent. A transparent
+		/// mark does not draw white pixels. That is, transparent
+		/// replaces white pixels with whatever is behind those pixels.
+		/// Available only for images.
+		/// </summary>
+		public bool BTransparent { get; set; } = false;
+
+		/// <summary>
+		/// The width of the line in pixels.
+		/// </summary>
+		public uint ULineSize { get; set; } = 0;
+
+		public uint UReserved1 { get; set; } = 0;
+
+		public uint UReserved2 { get; set; } = 0;
+
+		/// <summary>
+		/// The font information for the text, consisting of standard
+		// font attributes of font size, name, style, effects, and
+		// background color.
+		/// </summary>
+		public LOGFONTA LfFont { get; set; } = new LOGFONTA();
+
+		public uint BReserved3 { get; set; } = 0;
+
+		/// <summary>
+		/// The time that the mark was first saved, in seconds, from
+		/// 00:00:00 1-1-1970 GMT. Every annotation mark has
+		/// time as one of its attributes. If you do not set the time before
+		/// the file is saved, the time is set to the date and time that the
+		/// save was initiated. This time is in the form returned by the
+		/// "time" C call, which is the number of seconds since
+		/// midnight 00:00:00 on 1-1-1970 GMT. If necessary, refer
+		/// to your C documentation for a more detailed description.
+		/// </summary>
+		public long Time { get; set; } = 1235563376;
+
+		/// <summary>
+		/// TRUE ? The mark is currently set to be visible.
+		// Annotation marks can be visible or hidden.
+		/// </summary>
+		public bool BVisible { get; set; } = true;
+
+		public uint DwReserved4 { get; set; } = 1046591;
+
+		public int[] LReserved { get; set; } = new int[10];
+
+		public TextRenderingHint FontRenderingHint { get; set; } = TextRenderingHint.SystemDefault;
+
+		public TiffAnnotationMarkType UType { get; set; } = type;
+		#endregion
+
+		public string OiGroup { get; set; } = "[Без имени]";
+		public string OiIndex { get; set; } = "1";
+		public AN_POINTS OiAnoDat_AN_POINTS { get; set; }
+		public AN_NEW_ROTATE_STRUCT OiAnoDat_AN_NEW_ROTATE_STRUCT { get; set; }
+		public AN_NEW_ROTATE_STRUCT OiAnoDat_AN_NEW_ROTATE_STRUCT_Chosen { get; set; }
+		public HYPERLINK_NB OiHypLnk_HYPERLINK_NB { get; set; }
+		public OIAN_TEXTPRIVDATA OiAnText_OIAN_TEXTPRIVDATA { get; set; }
+		public AN_IMAGE_STRUCT OiDIB_AN_IMAGE_STRUCT { get; set; }
+		public AN_NAME_STRUCT OiFilNam_AN_NAME_STRUCT { get; set; }
+
+		/// <summary>
+		/// создаёт клон штампа для клона текущей модели страницы
+		/// </summary>
+		/// <param name="pm">страница-клон</param>
+		/// <returns>клон штампа</returns>
+		public TiffAnnotationItem Clone()
+		{
+			var res = new TiffAnnotationItem(UType)
+			{
+				LrBounds = this.LrBounds,
+				LrBoundsChosen = this.LrBoundsChosen,
+				RgbColor1 = this.RgbColor1,
+				RgbColor2 = this.RgbColor2,
+				BHighlighting = this.BHighlighting,
+				BTransparent = this.BTransparent,
+				ULineSize = this.ULineSize,
+				UReserved1 = this.UReserved1,
+				UReserved2 = this.UReserved2,
+				LfFont = this.LfFont?.Clone(),
+				BReserved3 = this.BReserved3,
+				Time = this.Time,
+				BVisible = this.BVisible,
+				DwReserved4 = this.DwReserved4,
+				LReserved = new int[this.LReserved.Length],
+				FontRenderingHint = this.FontRenderingHint,
+				OiGroup = this.OiGroup,
+				OiIndex = this.OiIndex,
+				OiAnoDat_AN_POINTS = this.OiAnoDat_AN_POINTS?.Clone(),
+				OiAnoDat_AN_NEW_ROTATE_STRUCT = this.OiAnoDat_AN_NEW_ROTATE_STRUCT?.Clone(),
+				OiAnoDat_AN_NEW_ROTATE_STRUCT_Chosen = this.OiAnoDat_AN_NEW_ROTATE_STRUCT_Chosen?.Clone(),
+				OiHypLnk_HYPERLINK_NB = this.OiHypLnk_HYPERLINK_NB?.Clone(),
+				OiAnText_OIAN_TEXTPRIVDATA = this.OiAnText_OIAN_TEXTPRIVDATA?.Clone(),
+				OiDIB_AN_IMAGE_STRUCT = this.OiDIB_AN_IMAGE_STRUCT?.Clone(),
+				OiFilNam_AN_NAME_STRUCT = this.OiFilNam_AN_NAME_STRUCT?.Clone(),
+			};
+
+			Array.Copy(this.LReserved, res.LReserved, LReserved.Length);
+
+			return res;
+		}
+
+		public void Tune(TiffAnnotationItem sample)
+		{
+			LrBounds = sample.LrBounds;
+			LrBoundsChosen = sample.LrBoundsChosen;
+			RgbColor1 = sample.RgbColor1;
+			RgbColor2 = sample.RgbColor2;
+			BHighlighting = sample.BHighlighting;
+			BTransparent = sample.BTransparent;
+			ULineSize = sample.ULineSize;
+			UReserved1 = sample.UReserved1;
+			UReserved2 = sample.UReserved2;
+			LfFont = sample.LfFont?.Clone();
+			BReserved3 = sample.BReserved3;
+			Time = sample.Time;
+			BVisible = sample.BVisible;
+			DwReserved4 = sample.DwReserved4;
+			LReserved = new int[sample.LReserved.Length];
+			Array.Copy(sample.LReserved, this.LReserved, LReserved.Length);
+			FontRenderingHint = sample.FontRenderingHint;
+			OiGroup = sample.OiGroup;
+			OiIndex = sample.OiIndex;
+			OiAnoDat_AN_POINTS = sample.OiAnoDat_AN_POINTS?.Clone();
+			OiAnoDat_AN_NEW_ROTATE_STRUCT = sample.OiAnoDat_AN_NEW_ROTATE_STRUCT?.Clone();
+			OiAnoDat_AN_NEW_ROTATE_STRUCT_Chosen = sample.OiAnoDat_AN_NEW_ROTATE_STRUCT_Chosen?.Clone();
+			OiHypLnk_HYPERLINK_NB = sample.OiHypLnk_HYPERLINK_NB?.Clone();
+			OiAnText_OIAN_TEXTPRIVDATA = sample.OiAnText_OIAN_TEXTPRIVDATA?.Clone();
+			OiDIB_AN_IMAGE_STRUCT = sample.OiDIB_AN_IMAGE_STRUCT?.Clone();
+			OiFilNam_AN_NAME_STRUCT = sample.OiFilNam_AN_NAME_STRUCT?.Clone();
+		}
+	}
+
+	/// <summary>
+	/// The type of the mark.
+	/// </summary>
+	public enum TiffAnnotationMarkType : uint
+	{
+		ImageEmbedded = 1,
+		ImageReference = 2,
+		StraightLine = 3,
+		FreehandLine = 4,
+		HollowRectangle = 5,
+		FilledRectangle = 6,
+		TypedText = 7,
+		TextFromFile = 8,
+		TextStamp = 9,
+		AttachNote = 10,
+		Form = 12,
+		OCRRegion = 13
+	}
+}

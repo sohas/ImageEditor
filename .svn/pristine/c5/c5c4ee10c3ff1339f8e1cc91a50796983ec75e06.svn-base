@@ -1,0 +1,15 @@
+﻿using ImageEditorControl.Models;
+using ImageEditorControl.Tools;
+using System.Windows;
+
+namespace ImageEditorApp
+{
+	public class ImageEditorAppLogger : ILogger
+	{
+		public void Log(Exception ex, string text, ImageModel im)
+		{
+			Action act = () => MessageBox.Show($"{ex}", text);
+			Application.Current.Dispatcher.BeginInvoke(act);
+		}
+	}
+}

@@ -1,0 +1,8 @@
+using System.Windows.Controls;
+
+namespace ImageEditorControl
+{
+	public class ImageEditorControl : UserControl, IImageEditorControl
+	{
+	}
+}

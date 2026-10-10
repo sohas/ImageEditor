@@ -1,0 +1,27 @@
+﻿using System;
+
+namespace ImageEditorControl.Models.TiffAnnotations
+{
+	/// <summary>
+	/// OiDIB для Image Embedded
+	/// </summary>
+	public class AN_IMAGE_STRUCT
+	{
+		/// <summary>
+		/// Standard DIB.
+		/// </summary>
+		public byte[] DibInfo { get; set; }
+
+		public AN_IMAGE_STRUCT Clone()
+		{
+			var res = new AN_IMAGE_STRUCT 
+			{
+				DibInfo = new byte[this.DibInfo.Length],
+			};
+
+			Buffer.BlockCopy(this.DibInfo, 0, res.DibInfo, 0, this.DibInfo.Length);
+
+			return res;
+		}
+	}
+}

@@ -1,0 +1,39 @@
+﻿using ImageEditorControl.Models;
+using System.Linq;
+
+namespace ImageEditorControl.Undo
+{
+	public class UndoStampRemove(PageModel pm, StampModel sm) : UndoAbstract(pm)
+	{
+		private readonly StampModel sm = sm;
+
+		public override bool NeedToRedrawPagePreview => true;
+
+		public override void Undo()
+		{
+			if (sm is not null && pm is not null && !pm.Stamps.Contains(sm))
+			{
+				pm.Stamps.Add(sm);
+				SelectPageModel();
+			}
+		}
+
+		public override UndoAbstract MakeUndoCloneUnsafe(ImageModel imageModelClone)
+		{
+			if (pm is not null && Im is not null)
+			{
+				var pmClone = imageModelClone.GetPageModelByPageNumberInitial(pm.PageNumberInitial);
+				var smClone = pmClone.Stamps.FirstOrDefault(x => x.Index == sm.Index);
+
+				if (pmClone is not null && smClone is not null)
+				{
+					return new UndoStampRemove(pmClone, smClone);
+				}
+			}
+
+			return new UndoStop();
+		}
+
+		public override UndoAbstract MakeRedoObject() => new UndoStampAdd(pm, sm);
+	}
+}

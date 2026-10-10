@@ -1,0 +1,20 @@
+﻿using System.Windows.Controls;
+
+namespace ImageEditorControl.UIs
+{
+	public class ListViewWithScrollEvent : ListView
+	{
+		//public event ScrollEventHandler Scroll;
+
+		//protected override void WndProc(ref Message m)
+		//{
+		//	base.WndProc(ref m);
+
+		//	if (m.Msg == 0x115)
+		//	{ // Trap WM_VSCROLL
+		//		var e = new ScrollEventArgs((ScrollEventType)(m.WParam.ToInt32() & 0xffff), 0);
+		//		Scroll?.Invoke(this, e);
+		//	}
+		//}
+	}
+}

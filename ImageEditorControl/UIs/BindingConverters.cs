@@ -1,0 +1,94 @@
+﻿using ImageEditorControl.Models;
+using System.Globalization;
+using System.Windows;
+using System.Windows.Data;
+using System.Windows.Media;
+
+namespace ImageEditorControl.UIs
+{
+	[ValueConversion(typeof(bool), typeof(Brush))]
+	public class BoolToBrushConverter(Brush trueBrush, Brush falseBrush) : IValueConverter
+	{
+		public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
+			value is bool b && b ? trueBrush : falseBrush;
+
+		public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+			throw new NotSupportedException();
+	}
+
+	[ValueConversion(typeof(PageModel), typeof(string))]
+	public class PageModelToStringConverter(string hasNotesName) : IValueConverter
+	{
+		public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+		{
+			if (value is PageModel pm && pm.ImageModelParent is ImageModel im)
+			{
+				im?.GetSortedPages().ToArray();
+
+				return $"{pm.PageNumberDisplayedSimple}{(pm.HasTiffAnnotations ? $", {hasNotesName}" : "")}";
+			}
+
+			return string.Empty;
+		}
+
+		public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+			throw new NotImplementedException();
+	}
+
+	[ValueConversion(typeof(bool), typeof(Visibility))]
+	public class BoolToVisabilityConverter() : IValueConverter
+	{
+		public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
+			value is bool b && b ? Visibility.Visible : Visibility.Collapsed;
+
+		public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+			throw new NotSupportedException();
+	}
+
+	[ValueConversion(typeof(RotateFlipType), typeof(Transform))]
+	public class RotateFlipToTransformConverter : IValueConverter
+	{
+		public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+		{
+			if (value == null)
+				return Transform.Identity;
+
+			TransformGroup transformGroup = new TransformGroup();
+			var rotateFlipType = (RotateFlipType)value;
+
+			switch (rotateFlipType)
+			{
+				case RotateFlipType.Rotate90FlipNone:   
+					transformGroup.Children.Add(new RotateTransform(90));
+					break;
+				case RotateFlipType.Rotate180FlipNone:  
+					transformGroup.Children.Add(new RotateTransform(180));
+					break;
+				case RotateFlipType.Rotate270FlipNone:  
+					transformGroup.Children.Add(new RotateTransform(270));
+					break;
+				case RotateFlipType.RotateNoneFlipX:    
+					transformGroup.Children.Add(new ScaleTransform(-1, 1));
+					break;
+				case RotateFlipType.Rotate90FlipX:      
+					transformGroup.Children.Add(new RotateTransform(90));
+					transformGroup.Children.Add(new ScaleTransform(-1, 1));
+					break;
+				case RotateFlipType.Rotate180FlipX:     
+					transformGroup.Children.Add(new RotateTransform(180));
+					break;
+				case RotateFlipType.Rotate270FlipX:     
+					transformGroup.Children.Add(new RotateTransform(270));
+					transformGroup.Children.Add(new ScaleTransform(-1, 1));
+					break;
+			}
+
+			return transformGroup;
+		}
+
+		public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+		{
+			throw new NotImplementedException();
+		}
+	}
+}

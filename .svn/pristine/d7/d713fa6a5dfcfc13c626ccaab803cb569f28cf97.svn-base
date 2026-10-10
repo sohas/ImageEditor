@@ -1,0 +1,30 @@
+﻿using ImageEditorControl.Models;
+using ImageEditorControl.Tools;
+
+namespace ImageEditorControl.Undo
+{
+	public class UndoPageShift(PageModel pm, PageModel pm2) : UndoAbstract(pm)
+	{
+		private readonly PageModel pm2 = pm2;
+
+		public override void Undo()
+		{
+			pm.SwapWithNextPageModel(pm2);
+			SelectPageModel();
+			pm.ImageModelParent.ChosenPagesChanged?.Invoke(null, null);
+			pm.ImageModelParent.OnPropertyChanged(NotifiedPropertyType.PagesChosen);
+		}
+
+		public override UndoAbstract MakeUndoCloneUnsafe(ImageModel imageModelClone)
+		{
+			var index = pm.PageNumberInitial;
+			var pmClone = imageModelClone.GetPageModelByPageNumberInitial(index);
+			var index2 = pm2.PageNumberInitial;
+			var pmClone2 = imageModelClone.GetPageModelByPageNumberInitial(index2);
+
+			return new UndoPageShift(pmClone, pmClone2);
+		}
+
+		public override UndoAbstract MakeRedoObject() => new UndoPageShift(pm, pm2);
+	}
+}

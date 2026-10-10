@@ -1,0 +1,39 @@
+﻿using ImageEditorControl.Models;
+using ImageEditorControl.Models.TiffAnnotations;
+
+namespace ImageEditorControl.Undo
+{
+	public class UndoTiffAnnotationRemove(PageModel pm, TiffAnnotationModel am) : UndoAbstract(pm)
+	{
+		public TiffAnnotationModel Am { get; private set; } = am;
+
+		public override bool NeedToRedrawPagePreview => true;
+
+		public override void Undo()
+		{
+			if (Am is not null && pm is not null && !pm.TiffAnnotations.Contains(Am))
+			{
+				pm.AddTiffAnnotation(Am);
+				SelectPageModel();
+			}
+		}
+
+		public override UndoAbstract MakeUndoCloneUnsafe(ImageModel imageModelClone)
+		{
+			if (pm is not null && Im is not null)
+			{
+				var pmClone = imageModelClone.GetPageModelByPageNumberInitial(pm.PageNumberInitial);
+				var amClone = pmClone.TiffAnnotations.FirstOrDefault(x => x.Index == Am.Index);
+
+				if (pmClone is not null && amClone is not null)
+				{
+					return new UndoTiffAnnotationRemove(pmClone, amClone);
+				}
+			}
+
+			return new UndoStop();
+		}
+
+		public override UndoAbstract MakeRedoObject() => new UndoTiffAnnotationAdd(pm, Am);
+	}
+}

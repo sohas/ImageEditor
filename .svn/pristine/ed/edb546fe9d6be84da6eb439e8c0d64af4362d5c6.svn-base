@@ -1,0 +1,29 @@
+﻿using ImageEditorControl.Models;
+
+namespace ImageEditorControl.States
+{
+	public class ApplyChangesState
+	{
+		public bool HasManyPages {get; set;} = false; 
+		public bool HasManyDocuments {get; set;} = false; 
+
+		public bool CanApplyFormatToDocuments {get; set;} = false;
+		public ImageFileFormat? ImageFormatChosen {get; set;} = null;
+
+		public bool CanApplyColorizeTypeToPages {get; set;} = false;
+		public bool CanApplyColorizeTypeToDocuments { get; set; } = false;
+		public ColorizeType? ColorizeTypeChosen {get; set;} = null;
+
+		public bool CanApplyTiffAnnotationSaveTypeToPages {get; set;} = false;
+		public bool CanApplyTiffAnnotationSaveTypeToDocuments { get; set; } = false;
+		public ExtraObjectsSaveType? TiffAnnotationSaveTypeChosen {get; set;} = null;
+
+		public bool CanApplyStampSaveTypeToPages {get; set;} = false;
+		public bool CanApplyStampSaveTypeToDocuments { get; set; } = false;
+		public ExtraObjectsSaveType? StampSaveTypeChosen {get; set;} = null;
+
+		public bool CanApplyToDocuments => HasManyDocuments && (CanApplyFormatToDocuments || CanApplyColorizeTypeToDocuments || CanApplyTiffAnnotationSaveTypeToDocuments || CanApplyStampSaveTypeToDocuments);
+		public bool CanApplyToPages => HasManyPages && (CanApplyColorizeTypeToPages || CanApplyTiffAnnotationSaveTypeToPages || CanApplyStampSaveTypeToPages);
+		public bool CanApplyToSomething => CanApplyToDocuments || CanApplyToPages;
+	}
+}

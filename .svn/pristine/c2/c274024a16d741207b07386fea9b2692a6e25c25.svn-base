@@ -1,0 +1,29 @@
+﻿using System.Drawing;
+using ImageEditorControl.Models;
+
+namespace ImageEditorControl.Undo
+{
+	public class UndoPageCrop(PageModel pm, Rectangle lastCrop, Rectangle currentCrop) : UndoAbstract(pm)
+	{
+		private readonly Rectangle lastCrop = lastCrop;
+		private readonly Rectangle currentCrop = currentCrop;
+		public bool IsUncrop => currentCrop == new Rectangle(0, 0, pm.WidthPXLOrigin, pm.HeightPXLOrigin);
+
+		public override void Undo()
+		{
+			pm.TrySetCropRectangleDirectly(lastCrop);
+			SelectPageModel();
+		}
+
+		public override UndoAbstract MakeUndoCloneUnsafe(ImageModel imageModelClone)
+		{
+			var index = pm.PageNumberInitial;
+			var pmClone = imageModelClone.GetPageModelByPageNumberInitial(index);
+
+			return new UndoPageCrop(pmClone, lastCrop, currentCrop);
+		}
+
+		public override UndoAbstract MakeRedoObject() =>
+			new UndoPageCrop(pm, currentCrop, lastCrop);
+	}
+}

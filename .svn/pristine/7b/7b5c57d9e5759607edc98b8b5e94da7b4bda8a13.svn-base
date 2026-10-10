@@ -1,0 +1,80 @@
+﻿using System.Collections.Concurrent;
+
+namespace OperationDispatcher
+{
+	public class ParallelChainDispatcher<TOpetationID>(IOperationLogger<TOpetationID> logger) where TOpetationID : IID
+	{
+		// Токен главной последовательной очереди приложения
+		public readonly ChainKey MainChainKey = new(Guid.Empty, "main queue");
+
+		// Словарь активных цепочек. ConcurrentDictionary обеспечивает потокобезопасность
+		private readonly ConcurrentDictionary<ChainKey, ChainContext<TOpetationID>> activeChains = new();
+
+		// Постановка задачи в Главную Очередь (последовательная, поддерживает прогресс)
+		public Task EnqueueMain(DispatchedOperation<TOpetationID> operation) => EnqueueOperation(MainChainKey, operation);
+
+		// Постановка задачи в параллельную независимую цепочку
+		public Task? EnqueueParallel(ChainKey parallelKey, DispatchedOperation<TOpetationID> operation)
+		{
+			if (parallelKey == MainChainKey)
+			{
+				var ex = new ArgumentException("The parallel chain cannot use the reserved key of the main queue.");
+				logger.LogOperation(LogType.Exception, (TOpetationID)IID.Empty, ex);
+				return null;
+			}
+
+			return EnqueueOperation(parallelKey, operation);
+		}
+
+		// Отправка задачи в конкретную цепочку
+		private Task EnqueueOperation(ChainKey key, DispatchedOperation<TOpetationID> operation)
+		{
+			// Получаем существующий контекст цепочки или создаем новый, если это первая задача
+			var chainContext = activeChains.GetOrAdd(key, k =>
+			{
+				var newContext = new ChainContext<TOpetationID>(k, () => RemoveChain(k), logger);
+				Task.Run(newContext.StartWorker); // Запускаем персональный последовательный поток выполнения
+				return newContext;
+			});
+
+			// Записываем задачу в канал этой цепочки
+			var t = chainContext.OperationsChannel.Writer.TryWrite(operation);
+			logger.LogOperation(LogType.Enqueue, operation.OperationID);
+
+			return operation.ExecutionTask;
+		}
+
+		// Метод отмены конкретной цепочки (например, закрыли один из документов)
+		public void CancelChain(ChainKey key)
+		{
+			if (activeChains.TryGetValue(key, out var chainContext))
+			{
+				chainContext.CancelAll();
+				activeChains.Clear();
+			}
+		}
+
+		// Метод отмены конкретной цепочек с одинаковым именем. довольно медленная операция
+		public void CancelChainsByChainName(string chainName)
+		{
+			var keys = activeChains.Keys.Where(x => x.ChainName == chainName).ToList();
+
+			foreach (var key in keys)
+			{
+				CancelChain(key);
+			}
+		}
+
+		// Метод отмены конкретной цепочки (например, закрыли один из документов)
+		public void CancelMainChain() => CancelChain(MainChainKey);
+
+		// Удаление цепочки из диспетчера, когда она опустела
+		private void RemoveChain(ChainKey key)
+		{
+			if (key != MainChainKey)
+			{
+				activeChains.TryRemove(key, out _);
+			}
+		}
+	}
+}

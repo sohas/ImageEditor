@@ -1,0 +1,226 @@
+﻿using PDFiumCore;
+using System.Windows.Media.Imaging;
+using System.Windows.Media;
+using System.Windows;
+using System.Runtime.InteropServices;
+using ImageEditorControl.Models;
+
+namespace ImageEditorControl.Tools
+{
+	public static class PdfiumCoreRenderer
+	{
+		private static readonly object _renderLock = new object();
+
+		public static BitmapSource RenderPageFromBytes(byte[] pdfBytes, PageModel pm, bool forThumbnail)
+		{
+			if (pdfBytes == null || pdfBytes.Length == 0)
+				throw new ArgumentException("Массив байт пуст.");
+
+			if (!PdfiumCoreLifecycleManager.IsInitialized)
+			{
+				PdfiumCoreLifecycleManager.Initialize();
+			}
+
+			lock (_renderLock)
+			{
+				// 1. Закрепляем (Pin) массив байт в управляемой памяти для C++
+				GCHandle pinnedArray = GCHandle.Alloc(pdfBytes, GCHandleType.Pinned);
+				IntPtr bufferAddr = pinnedArray.AddrOfPinnedObject();
+
+				try
+				{
+					// 2. ИСПОЛЬЗУЕМ VAR: Загружаем PDF напрямую из закрепленного участка памяти
+					var docHandle = fpdfview.FPDF_LoadMemDocument(bufferAddr, pdfBytes.Length, null);
+
+					// Проверяем нативный указатель. Если документ не загрузился, PDFium вернет пустой хэндл
+					if (docHandle == null || docHandle.Equals(default) || docHandle.Equals(IntPtr.Zero))
+					{
+						throw new Exception("Не удалось загрузить PDF из памяти.");
+					}
+
+					// Загружаем хэндл страницы
+					var pageHandle = fpdfview.FPDF_LoadPage(docHandle, pm.PageNumberInitial);
+					if (pageHandle == null || pageHandle.Equals(default) || pageHandle.Equals(IntPtr.Zero))
+					{
+						fpdfview.FPDF_CloseDocument(docHandle);
+						throw new Exception("Не удалось загрузить страницу.");
+					}
+
+					try
+					{
+						//// 3. Вычисляем системный DPI (для четкости графики, аннотаций и штампов)
+						//double dpiX = 1.0, dpiY = 1.0;
+						//Application.Current.Dispatcher.Invoke(() =>
+						//{
+						//	var dpi = Application.Current.MainWindow != null
+						//	    ? VisualTreeHelper.GetDpi(Application.Current.MainWindow)
+						//	    : new DpiScale(1.0, 1.0);
+						//	dpiX = dpi.DpiScaleX;
+						//	dpiY = dpi.DpiScaleY;
+						//});
+
+						//// Получаем физические размеры страницы
+						//int width = (int)(fpdfview.FPDF_GetPageWidth(pageHandle) * dpiX);
+						//int height = (int)(fpdfview.FPDF_GetPageHeight(pageHandle) * dpiY);
+
+						//// 3. Вычисляем системный DPI (для четкости графики, аннотаций и штампов)
+						//double dpiX = 1.0, dpiY = 1.0;
+						//Application.Current.Dispatcher.Invoke(() =>
+						//{
+						//	var dpi = Application.Current.MainWindow != null
+						//	    ? VisualTreeHelper.GetDpi(Application.Current.MainWindow)
+						//	    : new DpiScale(1.0, 1.0);
+						//	dpiX = dpi.DpiScaleX;
+						//	dpiY = dpi.DpiScaleY;
+						//});
+
+						// Получаем физические размеры страницы
+						double widthInInch = fpdfview.FPDF_GetPageWidth(pageHandle)/72;
+						double heightInInch = fpdfview.FPDF_GetPageHeight(pageHandle)/72;
+
+						var dpi = forThumbnail ? ImageModel.PdfResolutionForThumbnail : ImageModel.PdfResolutionForView;
+
+						int width = (int)(widthInInch * dpi);
+						int height = (int)(heightInInch * dpi);
+
+						// 4. Подготавливаем родной для WPF WriteableBitmap в формате BGRA32
+						var writeableBitmap = new WriteableBitmap(
+						    width, height,
+						    dpi, dpi,
+						    PixelFormats.Bgra32, null
+						);
+
+						writeableBitmap.Lock();
+						try
+						{
+							IntPtr backBuffer = writeableBitmap.BackBuffer;
+
+							// Создаем нативный контекст битмапа вокруг памяти WPF (формат 4 = BGRA)
+							var fpdfBitmap = fpdfview.FPDFBitmapCreateEx(width, height, 4, backBuffer, width * 4);
+
+							// Белая подложка, чтобы прозрачные штампы не рендерились на черном фоне
+							fpdfview.FPDFBitmapFillRect(fpdfBitmap, 0, 0, width, height, 0xFFFFFFFF);
+
+							// Константа 0x01 (FPDF_ANNOT) — принудительный рендеринг штампов и правок
+							int renderFlags = 0x01;
+							fpdfview.FPDF_RenderPageBitmap(fpdfBitmap, pageHandle, 0, 0, width, height, 0, renderFlags);
+
+							// Уничтожаем нативный мост битмапа (память BackBuffer при этом сохраняется)
+							fpdfview.FPDFBitmapDestroy(fpdfBitmap);
+
+							// Уведомляем WPF, что буфер обновлен
+							writeableBitmap.AddDirtyRect(new Int32Rect(0, 0, width, height));
+						}
+						finally
+						{
+							writeableBitmap.Unlock();
+						}
+
+						// 5. Замораживаем, чтобы объект можно было безопасно передать в UI-поток
+						writeableBitmap.Freeze();
+						return writeableBitmap;
+					}
+					finally
+					{
+						// Закрываем страницу
+						fpdfview.FPDF_ClosePage(pageHandle);
+						// Закрываем документ
+						fpdfview.FPDF_CloseDocument(docHandle);
+					}
+				}
+				finally
+				{
+					// И только в самом конце отпускаем массив байт в сборщик мусора .NET
+					if (pinnedArray.IsAllocated)
+					{
+						pinnedArray.Free();
+					}
+				}
+			}
+		}
+
+		/// <summary>
+		/// Быстро извлекает количество страниц и их физические размеры (в пунктах) напрямую из массива байт PDF.
+		/// Метод полностью потокобезопасен и не вызывает дедлоков графической системы Windows.
+		/// </summary>
+		public static List<PdfPageSize> GetPdfStructureFromBytes(byte[] pdfBytes)
+		{
+			if (pdfBytes == null || pdfBytes.Length == 0)
+				throw new ArgumentException("Массив байт PDF пуст.");
+
+			var structureList = new List<PdfPageSize>();
+
+			if (!PdfiumCoreLifecycleManager.IsInitialized)
+			{
+				PdfiumCoreLifecycleManager.Initialize();
+			}
+
+			// Блокируем доступ к нативному движку на время чтения структуры
+			lock (_renderLock)
+			{
+				// Закрепляем (Pin) массив байт в памяти .NET для безопасного чтения из C++
+				GCHandle pinnedArray = GCHandle.Alloc(pdfBytes, GCHandleType.Pinned);
+				IntPtr bufferAddr = pinnedArray.AddrOfPinnedObject();
+
+				try
+				{
+					// Загружаем документ напрямую из закрепленного участка памяти
+					var docHandle = fpdfview.FPDF_LoadMemDocument(bufferAddr, pdfBytes.Length, null);
+
+					if (docHandle == null || docHandle.Equals(default) || docHandle.Equals(IntPtr.Zero))
+					{
+						throw new Exception("PDFiumCore не смог загрузить документ из переданного массива байт.");
+					}
+
+					try
+					{
+						// 1. Получаем общее количество страниц в PDF-документе
+						int pageCount = fpdfview.FPDF_GetPageCount(docHandle);
+
+						// Временные переменные для нативного метода (double в C# соответствует double в C++)
+						double pointsWidth = 0;
+						double pointsHeight = 0;
+
+						// 2. В быстром цикле собираем размеры БЕЗ фактической загрузки страниц (FPDF_LoadPage не вызывается!)
+						for (int i = 0; i < pageCount; i++)
+						{
+							// Функция заглядывает в таблицу /Pages файла и считывает MediaBox/CropBox страницы.
+							// Возвращает 1 (true) в случае успеха.
+							int success = fpdfview.FPDF_GetPageSizeByIndex(docHandle, i, ref pointsWidth, ref pointsHeight);
+
+							if (success != 0)
+							{
+								structureList.Add(new PdfPageSize
+								{
+									PageIndex = i,
+									PointsWidth = pointsWidth,
+									PointsHeight = pointsHeight
+								});
+							}
+							else
+							{
+								// На случай битой страницы добавляем пустую заглушку, чтобы не сбить индексы в списке
+								structureList.Add(new PdfPageSize { PageIndex = i, PointsWidth = 0, PointsHeight = 0 });
+							}
+						}
+					}
+					finally
+					{
+						// Обязательно закрываем хэндл документа на стороне C++
+						fpdfview.FPDF_CloseDocument(docHandle);
+					}
+				}
+				finally
+				{
+					// Только после закрытия нативного документа отпускаем массив байт в GC .NET
+					if (pinnedArray.IsAllocated)
+					{
+						pinnedArray.Free();
+					}
+				}
+			}
+
+			return structureList;
+		}
+	}
+}

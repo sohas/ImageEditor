@@ -1,0 +1,34 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace ImageEditorControl.Tools
+{
+	public struct PdfPageSize
+	{
+		public int PageIndex
+		{
+			get; set;
+		}
+		public double PointsWidth
+		{
+			get; set;
+		}  // Физический размер в пунктах PDF
+		public double PointsHeight
+		{
+			get; set;
+		} // Физический размер в пунктах PDF
+
+		// Полезные хелперы для вывода в интерфейсе
+		public double MillimetersWidth => PointsWidth * 0.352778;
+		public double MillimetersHeight => PointsHeight * 0.352778;
+
+		/// <summary>
+		/// Возвращает размер в экранных пикселях с учетом системного DPI (96 стандарт)
+		/// </summary>
+		public int GetPixelsWidth(double dpiScaleX) => (int)(PointsWidth * dpiScaleX);
+		public int GetPixelsHeight(double dpiScaleY) => (int)(PointsHeight * dpiScaleY);
+	}
+}

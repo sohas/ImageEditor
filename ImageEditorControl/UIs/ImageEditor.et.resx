@@ -1,0 +1,365 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<!-- 
+		Microsoft ResX Schema
+
+		Version 1.3
+
+		The primary goals of this format is to allow a simple XML format 
+		that is mostly human readable. The generation and parsing of the 
+		various data types are done through the TypeConverter classes 
+		associated with the data types.
+
+		Example:
+
+		... ado.net/XML headers & schema ...
+		<resheader name="resmimetype">text/microsoft-resx</resheader>
+		<resheader name="version">1.3</resheader>
+		<resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+		<resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+		<data name="Name1">this is my long string</data>
+		<data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+		<data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+			[base64 mime encoded serialized .NET Framework object]
+		</data>
+		<data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+			[base64 mime encoded string representing a byte array form of the .NET Framework object]
+		</data>
+
+		There are any number of "resheader" rows that contain simple 
+		name/value pairs.
+
+		Each data row contains a name, and value. The row also contains a 
+		type or mimetype. Type corresponds to a .NET class that support 
+		text/value conversion through the TypeConverter architecture. 
+		Classes that don't support this are serialized and stored with the 
+		mimetype set.
+
+		The mimetype is used for serialized objects, and tells the 
+		ResXResourceReader how to depersist the object. This is currently not 
+		extensible. For a given mimetype the value must be set accordingly:
+
+		Note - application/x-microsoft.net.object.binary.base64 is the format 
+		that the ResXResourceWriter will generate, however the reader can 
+		read any of the formats listed below.
+
+		mimetype: application/x-microsoft.net.object.binary.base64
+		value   : The object must be serialized with 
+			: System.Serialization.Formatters.Binary.BinaryFormatter
+			: and then encoded with base64 encoding.
+
+		mimetype: application/x-microsoft.net.object.soap.base64
+		value   : The object must be serialized with 
+			: System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+			: and then encoded with base64 encoding.
+
+		mimetype: application/x-microsoft.net.object.bytearray.base64
+		value   : The object must be serialized into a byte array 
+			: using a System.ComponentModel.TypeConverter
+			: and then encoded with base64 encoding.
+	-->
+	
+	<xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+		<xsd:element name="root" msdata:IsDataSet="true">
+			<xsd:complexType>
+				<xsd:choice maxOccurs="unbounded">
+					<xsd:element name="data">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+								<xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" msdata:Ordinal="1" />
+							<xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+							<xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="resheader">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" use="required" />
+						</xsd:complexType>
+					</xsd:element>
+				</xsd:choice>
+			</xsd:complexType>
+		</xsd:element>
+	</xsd:schema>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>1.3</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.3500.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.3500.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+        <data name="formName" xml:space="preserve">
+                <value>Dokumendi piltide redaktor</value>
+        </data>
+        <data name="deletePageName" xml:space="preserve">
+                <value>Kustuta leht</value>
+        </data>
+        <data name="colorizeName" xml:space="preserve">
+                <value>Värviline</value>
+        </data>
+        <data name="bwName" xml:space="preserve">
+                <value>B/W</value>
+        </data>
+        <data name="grayName" xml:space="preserve">
+                <value>Halli toonides</value>
+        </data>
+        <data name="rotateRName" xml:space="preserve">
+                <value>Pöörake 90 paremale</value>
+        </data>
+        <data name="rotateLName" xml:space="preserve">
+                <value>Pöörake 90 vasakule</value>
+        </data>
+        <data name="flipXName" xml:space="preserve">
+                <value>Peegeldage originaali horisontaalselt</value>
+        </data>
+        <data name="flipYName" xml:space="preserve">
+                <value>Peegeldage originaali vertikaalselt</value>
+        </data>
+        <data name="cropName" xml:space="preserve">
+                <value>Kärpima</value>
+        </data>
+        <data name="uncropName" xml:space="preserve">
+                <value>Tühistage ümberlõikamine</value>
+        </data>
+        <data name="fitToSelectionName" xml:space="preserve">
+                <value>Kuvada valiku järgi</value>
+        </data>
+        <data name="hasNotesName" xml:space="preserve">
+                <value>On märkmeid</value>
+        </data>
+        <data name="setStampOnLocationName" xml:space="preserve">
+                <value>Pange lihtne tempel</value>
+        </data>
+        <data name="setStampFullImageName" xml:space="preserve">
+                <value>Määra kogu pildi tempel</value>
+        </data>
+        <data name="setStampFitToImageName" xml:space="preserve">
+                <value>Määra suur tempel</value>
+        </data>
+        <data name="removeStampName" xml:space="preserve">
+                <value>Eemaldage tempel</value>
+        </data>
+        <data name="removeAnnotationName" xml:space="preserve">
+                <value>Kustuta märkus</value>
+        </data>
+        <data name="editAnnotationName" xml:space="preserve">
+                <value>Redigeeri märkust</value>
+        </data>
+        <data name="setMarkerAnnotationName" xml:space="preserve">
+                <value>Lisage märkus-marker</value>
+        </data>
+        <data name="setFrameAnnotationName" xml:space="preserve">
+                <value>Lisage märkus-raam</value>
+        </data>
+        <data name="setSimpleTextAnnotationName" xml:space="preserve">
+                <value>Lisage märkus-tekst</value>
+        </data>
+        <data name="setTextWithBackgroundAnnotationName" xml:space="preserve">
+                <value>Lisage märkus-tekst taustaga</value>
+        </data>
+        <data name="okName" xml:space="preserve">
+                <value>OK</value>
+        </data>
+        <data name="cancelName" xml:space="preserve">
+                <value>Tühistama</value>
+        </data>
+        <data name="colorName" xml:space="preserve">
+                <value>Värv</value>
+        </data>
+        <data name="chooseColorName" xml:space="preserve">
+                <value>Värvivalik</value>
+        </data>
+        <data name="chooseTextName" xml:space="preserve">
+                <value>Teksti valik</value>
+        </data>
+        <data name="textColorName" xml:space="preserve">
+                <value>Teksti värv</value>
+        </data>
+        <data name="backColorName" xml:space="preserve">
+                <value>Taustavärv</value>
+        </data>
+        <data name="fontName" xml:space="preserve">
+                <value>Font</value>
+        </data>
+        <data name="chooseFrameName" xml:space="preserve">
+                <value>Raami valik</value>
+        </data>
+        <data name="keepAnnotationsName" xml:space="preserve">
+                <value>Märkmetega</value>
+        </data>
+        <data name="loseAnnotationsName" xml:space="preserve">
+                <value>Märkmeid pole</value>
+        </data>
+        <data name="burnAnnotationsName" xml:space="preserve">
+                <value>Rakendatud märkmetega</value>
+        </data>
+        <data name="physicalSizeName" xml:space="preserve">
+                <value>Füüsiline suurus</value>
+        </data>
+        <data name="fitToWindowName" xml:space="preserve">
+                <value>Sobib aknale</value>
+        </data>
+        <data name="fitToHeightName" xml:space="preserve">
+                <value>Sobib kõrgusele</value>
+        </data>
+        <data name="fitToWidthName" xml:space="preserve">
+                <value>Sobib laiusele</value>
+        </data>
+        <data name="loseStampsName" xml:space="preserve">
+                <value>Ilma templiteta</value>
+        </data>
+        <data name="burnStampsName" xml:space="preserve">
+                <value>Templitega</value>
+        </data>
+        <data name="shiftPageDownName" xml:space="preserve">
+                <value>Lehekülg alla</value>
+        </data>
+        <data name="shiftPageUpName" xml:space="preserve">
+                <value>Lehekülg üles</value>
+        </data>
+        <data name="addExtraFileBeforeThisPageName" xml:space="preserve">
+                <value>Lisa lisafail enne seda lehte</value>
+        </data>
+        <data name="documentNameName" xml:space="preserve">
+                <value>Dokumendi nimi</value>
+        </data>
+        <data name="changeDocumentNameName" xml:space="preserve">
+                <value>Muutke dokumendi nime</value>
+        </data>
+        <data name="returnToOriginDocumentNameName" xml:space="preserve">
+                <value>Lähtesta standard dokumendi nimi</value>
+        </data>
+        <data name="attentionName" xml:space="preserve">
+                <value>Tähelepanu</value>
+        </data>
+        <data name="cannotSaveName" xml:space="preserve">
+                <value>Te ei saa faili praegustes tingimustes salvestada</value>
+        </data>
+        <data name="savePlainImageName" xml:space="preserve">
+                <value>Sa üritad salvestada faili mitte pdf - või tif-tüüpi. Kõik muudatused lähevad kaotsi. Jätkata?</value>
+        </data>
+        <data name="fileExistsName" xml:space="preserve">
+                <value>Fail on juba olemas. Kirjutada üle?</value>
+        </data>
+        <data name="applyToName" xml:space="preserve">
+                <value>Rakenda</value>
+        </data>
+        <data name="applyChangesToName" xml:space="preserve">
+                <value>Rakenda muudatused</value>
+        </data>
+        <data name="pagesName" xml:space="preserve">
+                <value>kõigile dokumendi lehekülgedele</value>
+        </data>
+        <data name="documentsName" xml:space="preserve">
+                <value>kõigile dokumentidele</value>
+        </data>
+        <data name="documentTitleName" xml:space="preserve">
+                <value>Paber:</value>
+        </data>
+        <data name="pageTitleName" xml:space="preserve">
+                <value>Leht:</value>
+        </data>
+        <data name="annotationAddedName" xml:space="preserve">
+                <value>Märkus lisatud</value>
+        </data>
+        <data name="annotationEditedName" xml:space="preserve">
+                <value>Märkus muudetud</value>
+        </data>
+        <data name="annotationRemovedName" xml:space="preserve">
+                <value>Märkus kustutatud</value>
+        </data>
+        <data name="extraModelAddedName" xml:space="preserve">
+                <value>Lisatud fail</value>
+        </data>
+        <data name="documentNameChangedName" xml:space="preserve">
+                <value>Dokumendi nimi muudetud</value>
+        </data>
+        <data name="pageDeletedName" xml:space="preserve">
+                <value>Lehekülg kustutatud</value>
+        </data>
+        <data name="pagesDeletedMultipleName" xml:space="preserve">
+                <value>Kustutatud mitu lehekülge</value>
+        </data>
+        <data name="pageRestoredName" xml:space="preserve">
+                <value>Lehekülg Taastatud</value>
+        </data>
+        <data name="pagesRestoredMultipleName" xml:space="preserve">
+                <value>Mitu lehekülge taastatud</value>
+        </data>
+        <data name="pageShiftedName" xml:space="preserve">
+                <value>Lehekülg nihutatud</value>
+        </data>
+        <data name="stampAddedName" xml:space="preserve">
+                <value>Tempel lisatud</value>
+        </data>
+        <data name="stampEditedName" xml:space="preserve">
+                <value>Tempel redigeeritud</value>
+        </data>
+        <data name="stampRemovedName" xml:space="preserve">
+                <value>Tempel kustutatud</value>
+        </data>
+        <data name="undoName" xml:space="preserve">
+                <value>Tühistama:</value>
+        </data>
+        <data name="redoName" xml:space="preserve">
+                <value>Tagastama:</value>
+        </data>
+        <data name="zoomInName" xml:space="preserve">
+                <value>Suurendamine</value>
+        </data>
+        <data name="zoomOutName" xml:space="preserve">
+                <value>Vähendamiseks</value>
+        </data>
+        <data name="previousPageName" xml:space="preserve">
+                <value>Eelmine lehekülg</value>
+        </data>
+        <data name="nextPageName" xml:space="preserve">
+                <value>Järgmine lehekülg</value>
+        </data>
+        <data name="cannotAddNoImageName" xml:space="preserve">
+                <value>Pilti ei saa lisada</value>
+        </data>
+        <data name="selectFragmentName" xml:space="preserve">
+                <value>Valige fragment</value>
+        </data>
+        <data name="cannotWriteToDirectoryName" xml:space="preserve">
+                <value>Sellesse kataloogi ei saa faile kirjutada</value>
+        </data>
+        <data name="showThumbnailsName" xml:space="preserve">
+                <value>Näita leheküljed</value>
+        </data>
+        <data name="addToSelectionMultipleName" xml:space="preserve">
+                <value>Lisa leht valiku</value>
+        </data>
+        <data name="removeFromSelectionMultipleName" xml:space="preserve">
+                <value>Eemalda lehekülje valimine</value>
+        </data>
+        <data name="copyPageTextName" xml:space="preserve">
+                <value>Kopeeri lehe tekst</value>
+        </data>
+        <data name="noTextName" xml:space="preserve">
+                <value>Lehel pole teksti</value>
+        </data>
+        <data name="textIsExtractingName" xml:space="preserve">
+                <value>Ekstraheeritakse tekst…</value>
+        </data>
+        <data name="buildingImageModelName" xml:space="preserve">
+                <value>Kujutise mudeli loomine</value>
+        </data>
+        <data name="readingFileName" xml:space="preserve">
+                <value>Faili lugemine</value>
+        </data>
+        <data name="savingImageModelName" xml:space="preserve">
+                <value>Faili salvestamine</value>
+        </data>
+</root>

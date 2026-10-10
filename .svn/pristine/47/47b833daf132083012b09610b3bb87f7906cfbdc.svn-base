@@ -1,0 +1,597 @@
+﻿using ImageEditorControl.Models;
+using ImageEditorControl.Models.TiffAnnotations;
+using ImageEditorControl.States;
+using ImageEditorControl.Tools;
+using ImageEditorControl.Undo;
+
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+
+namespace ImageEditorControl.UIs
+{
+	public class ImageEditor : UserControl
+	{
+		private static readonly ComponentResourceManager resources = new ComponentResourceManager(typeof(ImageEditor));
+		private readonly static string documentImageEditorControlName = resources.GetString("formName");
+		private readonly static string deletePageName = resources.GetString("deletePageName");
+		private readonly static string colorizeName = resources.GetString("colorizeName");
+		private readonly static string bwName = resources.GetString("bwName");
+		private readonly static string grayName = resources.GetString("grayName");
+		private readonly static string rotateRName = resources.GetString("rotateRName");
+		private readonly static string rotateLName = resources.GetString("rotateLName");
+		private readonly static string flipXName = resources.GetString("flipXName");
+		private readonly static string flipYName = resources.GetString("flipYName");
+		private readonly static string cropName = resources.GetString("cropName");
+		private readonly static string uncropName = resources.GetString("uncropName");
+		private readonly static string fitToSelectionName = resources.GetString("fitToSelectionName");
+		private readonly static string hasNotesName = resources.GetString("hasNotesName");
+		private readonly static string setStampOnLocationName = resources.GetString("setStampOnLocationName");
+		private readonly static string setStampFullImageName = resources.GetString("setStampFullImageName");
+		private readonly static string setStampFitToImageName = resources.GetString("setStampFitToImageName");
+		private readonly static string removeStampName = resources.GetString("removeStampName");
+		private readonly static string removeAnnotationName = resources.GetString("removeAnnotationName");
+		private readonly static string editAnnotationName = resources.GetString("editAnnotationName");
+		private readonly static string setMarkerAnnotationName = resources.GetString("setMarkerAnnotationName");
+		private readonly static string setFrameAnnotationName = resources.GetString("setFrameAnnotationName");
+		private readonly static string setSimpleTextAnnotationName = resources.GetString("setSimpleTextAnnotationName");
+		private readonly static string setTextWithBackgroundAnnotationName = resources.GetString("setTextWithBackgroundAnnotationName");
+		private readonly static string keepAnnotationsName = resources.GetString("keepAnnotationsName");
+		private readonly static string loseAnnotationsName = resources.GetString("loseAnnotationsName");
+		private readonly static string burnAnnotationsName = resources.GetString("burnAnnotationsName");
+		private readonly static string physicalSizeName = resources.GetString("physicalSizeName");
+		private readonly static string fitToWindowName = resources.GetString("fitToWindowName");
+		private readonly static string fitToHeightName = resources.GetString("fitToHeightName");
+		private readonly static string fitToWidthName = resources.GetString("fitToWidthName");
+		private readonly static string loseStampsName = resources.GetString("loseStampsName");
+		private readonly static string burnStampsName = resources.GetString("burnStampsName");
+		private readonly static string shiftPageDownName = resources.GetString("shiftPageDownName");
+		private readonly static string shiftPageUpName = resources.GetString("shiftPageUpName");
+		private readonly static string addExtraFileBeforeThisPageName = resources.GetString("addExtraFileBeforeThisPageName");
+		private readonly static string documentNameName = resources.GetString("documentNameName");
+		private readonly static string changeDocumentNameName = resources.GetString("changeDocumentNameName");
+		private readonly static string attentionName = resources.GetString("attentionName");
+		private readonly static string cannotSaveName = resources.GetString("cannotSaveName");
+		private readonly static string savePlainImageName = resources.GetString("savePlainImageName");
+		private readonly static string fileExistsName = resources.GetString("fileExistsName");
+		private readonly static string applyToName = resources.GetString("applyToName");
+		private readonly static string documentTitleName = resources.GetString("documentTitleName");
+		private readonly static string pageTitleName = resources.GetString("pageTitleName");
+		private readonly static string annotationAddedName = resources.GetString("annotationAddedName");
+		private readonly static string annotationEditedName = resources.GetString("annotationEditedName");
+		private readonly static string annotationRemovedName = resources.GetString("annotationRemovedName");
+		private readonly static string extraModelAddedName = resources.GetString("extraModelAddedName");
+		private readonly static string documentNameChangedName = resources.GetString("documentNameChangedName");
+		private readonly static string pageDeletedName = resources.GetString("pageDeletedName");
+		private readonly static string pagesDeletedMultipleName = resources.GetString("pagesDeletedMultipleName");
+		private readonly static string pageRestoredName = resources.GetString("pageRestoredName");
+		private readonly static string pagesRestoredMultipleName = resources.GetString("pagesRestoredMultipleName");
+		private readonly static string pageShiftedName = resources.GetString("pageShiftedName");
+		private readonly static string stampAddedName = resources.GetString("stampAddedName");
+		private readonly static string stampEditedName = resources.GetString("stampEditedName");
+		private readonly static string stampRemovedName = resources.GetString("stampRemovedName");
+		private readonly static string undoName = resources.GetString("undoName");
+		private readonly static string redoName = resources.GetString("redoName");
+		private readonly static string zoomInName = resources.GetString("zoomInName");
+		private readonly static string zoomOutName = resources.GetString("zoomOutName");
+		private readonly static string previousPageName = resources.GetString("previousPageName");
+		private readonly static string nextPageName = resources.GetString("nextPageName");
+		private readonly static string cannotAddNoImageName = resources.GetString("cannotAddNoImageName");
+		private readonly static string selectFragmentName = resources.GetString("selectFragmentName");
+		private readonly static string cannotWriteToDirectoryName = resources.GetString("cannotWriteToDirectoryName");
+		private readonly static string showThumbnailsName = resources.GetString("showThumbnailsName");
+		private readonly static string addToSelectionMultipleName = resources.GetString("addToSelectionMultipleName");
+		private readonly static string removeFromSelectionMultipleName = resources.GetString("removeFromSelectionMultipleName");
+		private readonly static string copyPageTextName = resources.GetString("copyPageTextName");
+
+		private readonly ControlSettings controlSettings;
+		private readonly ImageCacheSettings imageCacheSettings;
+		private readonly ILogger logger;
+
+		private readonly bool canSelectFragment = false;
+		private readonly bool showUndoRedo = false;
+		private readonly bool canScale = false;
+		private readonly bool canChangeFileName = false;
+		private readonly bool canShiftPages = false;
+		private readonly bool canDeletePages = false;
+		private readonly bool canAddExtraFiles = false;
+		private readonly bool canSetStamps = false;
+		private readonly bool canSetTiffAnnotations = false;
+		private readonly bool canCrop = false;
+		private readonly bool canFlipPage = false;
+		private readonly bool savePageView = false;
+		private readonly bool canSelectPagesMultiple = false;
+		private readonly bool showSaveStamps = false;
+
+		protected bool useViewTools = false;
+		protected bool useSaveTools = false;
+		protected bool useInfoTools = false;
+
+		private bool isResizing = false;
+		private bool isFrafmentSelecting = false;
+		private bool isPageMoving = false;
+		private bool isStampMoving = false;
+		private bool isTiffAnnotationMoving = false;
+		private bool isFreezing = false;
+		private bool isDisposing = false;
+		private bool canCheckState = true;
+		private bool isButtonSelectFragmentOn = false;//состояние нажатия кнопки постоянного выделения фрагмента
+		private bool isButtonShowThumbnailsOn = true;//состояние нажатия кнопки показа панели превью
+
+		protected readonly Grid tableLayoutPanelMain = new Grid();
+		protected readonly WrapPanel flowLayoutPanelSaveTools = new WrapPanel();
+		protected readonly WrapPanel flowLayoutPanelViewTools = new WrapPanel();
+		protected readonly WrapPanel flowLayoutPanelInfoTools = new WrapPanel();
+
+		protected readonly Grid panelSplit = new Grid();
+
+		protected readonly Label labelDocumentTitle = new Label();
+		protected readonly Button buttonShowThumbnails = new Button();
+		protected readonly Button buttonDocumentName = new Button();
+		protected readonly ComboBox comboboxImageFileFormatType = new ComboBox();
+		protected readonly ComboBox comboboxColorizeType = new ComboBox();
+		protected readonly ComboBox comboboxTiffAnnotationSaveType = new ComboBox();
+		protected readonly ComboBox comboboxStampSaveType = new ComboBox();
+		protected readonly Button buttonApplyTo = new Button();
+		protected readonly Label labelPageTitle = new Label();
+		protected readonly Button buttonUndo = new Button();
+		protected readonly Button buttonRedo = new Button();
+		protected readonly Button buttonPreviousPage = new Button();
+		protected readonly ComboBox comboboxPages = new ComboBox();
+		protected readonly Button buttonNextPage = new Button();
+		protected readonly ComboBox comboboxDrawSizeType = new ComboBox();
+		protected readonly Button buttonZoomIn = new Button();
+		protected readonly Button buttonZoomOut = new Button();
+		protected readonly Button buttonRotateL = new Button();
+		protected readonly Button buttonRotateR = new Button();
+		protected readonly Button buttonFlipX = new Button();
+		protected readonly Button buttonFlipY = new Button();
+		protected readonly Button buttonSelectFragment = new Button();
+		//protected readonly PanelSelectionMultiple panelSelectionMultiple = new PanelSelectionMultiple();
+
+		protected readonly SolidColorBrush appBrush = SystemColors.ControlBrush;
+		protected readonly Thickness standardThickness = new Thickness(4, 2, 4, 2);
+
+		protected readonly Label labelInfo = new Label();
+		protected readonly ProgressBar progressBarApply = new ProgressBar();
+
+		protected readonly Grid splitContainerPage = new Grid();
+		protected readonly GridSplitter splitter = new GridSplitter();
+		protected readonly ListView listViewThumbnails = new ListView();
+		protected readonly Canvas panelView = new Canvas();
+
+		protected readonly Cursor handCursor = CursorHelper.CreateCursorFromPng(Resource.ImageMoveCursor);
+		protected readonly Cursor moveCursor = CursorHelper.CreateCursorFromPng(Resource.ImageMoveCursor2);
+
+		private DispatcherTimer _scrollDebounceTimer;
+
+		private GridLength lastThumbnailPanelLenght = new GridLength(); 
+
+		public ControlSettings EditorControlSettings => controlSettings;
+		public ImageCacheSettings ImageCacheSettings => imageCacheSettings;
+
+		protected bool IsButtonShowThumbnailsOn//состояние нажатия кнопки постоянного выделения фрагмента
+		{
+			get => isButtonShowThumbnailsOn;
+			set
+			{
+				if (isButtonShowThumbnailsOn != value)
+				{
+					isButtonShowThumbnailsOn = value;
+
+					if (isButtonShowThumbnailsOn)
+					{
+						buttonShowThumbnails.Background = Brushes.White;
+						splitContainerPage.ColumnDefinitions[0].Width = lastThumbnailPanelLenght;
+					}
+					else
+					{
+						lastThumbnailPanelLenght = splitContainerPage.ColumnDefinitions[0].Width;
+						buttonShowThumbnails.Background = SystemColors.ControlBrush;
+						splitContainerPage.ColumnDefinitions[0].Width = new GridLength(0, GridUnitType.Pixel );
+					}
+				}
+			}
+		}
+
+		public ImageEditor(ControlSettings controlSettings, ImageCacheSettings imageCacheSettings, ILogger logger)
+		{
+			this.controlSettings = controlSettings;
+			this.imageCacheSettings = imageCacheSettings;
+			this.logger = logger;
+
+			this.canSelectFragment = this.controlSettings.HasFlag(ControlSettings.CanSelectFragment);
+			this.showUndoRedo = this.controlSettings.HasFlag(ControlSettings.ShowUndoRedo);
+			this.canScale = this.controlSettings.HasFlag(ControlSettings.CanScale);
+			this.canChangeFileName = this.controlSettings.HasFlag(ControlSettings.CanChangeFileName);
+			this.useViewTools = this.controlSettings.HasFlag(ControlSettings.UseViewTools);
+			this.useSaveTools = this.controlSettings.HasFlag(ControlSettings.UseSaveTools);
+			this.useInfoTools = this.controlSettings.HasFlag(ControlSettings.UseInfoTools);
+			this.canShiftPages = this.controlSettings.HasFlag(ControlSettings.CanShiftPages);
+			this.canDeletePages = this.controlSettings.HasFlag(ControlSettings.CanDeletePages);
+			this.canAddExtraFiles = this.controlSettings.HasFlag(ControlSettings.CanAddExtraFiles);
+			this.canSetStamps = this.controlSettings.HasFlag(ControlSettings.CanSetStamps);
+			this.canSetTiffAnnotations = this.controlSettings.HasFlag(ControlSettings.CanSetTiffAnnotations);
+			this.canCrop = this.controlSettings.HasFlag(ControlSettings.CanCrop);
+			this.canFlipPage = this.controlSettings.HasFlag(ControlSettings.CanFlipPage);
+			this.savePageView = this.controlSettings.HasFlag(ControlSettings.SavePageView);
+			this.canSelectPagesMultiple = this.controlSettings.HasFlag(ControlSettings.CanSelectPagesMultiple);
+			this.showSaveStamps = this.controlSettings.HasFlag(ControlSettings.ShowSaveStamps);
+
+			InitializeComponent();
+		}
+
+		public void Load(string filename)
+		{
+			var im = new ImageModel(filename);
+			BindNewImageModel(im);
+		}
+
+		public static string GetAnotationTypeName(ExtraObjectsSaveType annotationSaveType)
+		{
+			return annotationSaveType switch
+			{
+				ExtraObjectsSaveType.Lose => loseAnnotationsName,
+				ExtraObjectsSaveType.Burn => burnAnnotationsName,
+				_ => keepAnnotationsName,
+			};
+		}
+
+		public static string GetStampTypeName(ExtraObjectsSaveType annotationSaveType)
+		{
+			return annotationSaveType switch
+			{
+				ExtraObjectsSaveType.Lose => loseStampsName,
+				_ => burnStampsName,
+			};
+		}
+
+		public static string GetColorizeTypeName(ColorizeType colorizeType)
+		{
+			return colorizeType switch
+			{
+				ColorizeType.Gray => grayName,
+				ColorizeType.BW => bwName,
+				_ => colorizeName,
+			};
+		}
+
+		public static string GetDrawSizeTypeName(DrawSizeType drawSizeType, double scale)
+		{
+			return drawSizeType switch
+			{
+				DrawSizeType.PhysicalSize => physicalSizeName,
+				DrawSizeType.FitToWindow => fitToWindowName,
+				DrawSizeType.FitToHeight => fitToHeightName,
+				DrawSizeType.FitToWidth => fitToWidthName,
+				_ => $" {Math.Round(scale * 100)}%",
+			};
+		}
+
+		public static string GetImageFileFormatName(ImageFileFormat imageFileFormat) =>
+			imageFileFormat == ImageFileFormat.Unknown ? "?" : $"{imageFileFormat}";
+
+		public WrapPanel SetFlowLayoutPanelSaveToolsOut(FrameworkElement element) =>
+			flowLayoutPanelSaveTools.SetPanelOut(element, ref useSaveTools);
+
+		public WrapPanel SetFlowLayoutPanelViewToolsOut(FrameworkElement element) =>
+			flowLayoutPanelViewTools.SetPanelOut(element, ref useViewTools);
+
+		public WrapPanel SetFlowLayoutPanelInfoToolsOut(FrameworkElement element) =>
+			flowLayoutPanelInfoTools.SetPanelOut(element, ref useInfoTools);
+
+		private void InitializeComponent()
+		{
+			labelDocumentTitle.Content = documentTitleName;
+			labelDocumentTitle.IsEnabled = false;
+			labelDocumentTitle.Margin = standardThickness;
+
+			flowLayoutPanelSaveTools.Children.Add(labelDocumentTitle);
+			flowLayoutPanelSaveTools.Margin = standardThickness;
+			flowLayoutPanelSaveTools.Visibility = useSaveTools ? Visibility.Visible : Visibility.Hidden;
+
+			SetupButton(buttonShowThumbnails, null, Resource.ImageShowThumbnails, showThumbnailsName);
+			buttonShowThumbnails.Background = Brushes.White;
+			buttonShowThumbnails.Click += (o, e) => IsButtonShowThumbnailsOn = !IsButtonShowThumbnailsOn;
+
+			flowLayoutPanelViewTools.Children.Add(buttonShowThumbnails);
+			flowLayoutPanelViewTools.Margin = standardThickness;
+			flowLayoutPanelViewTools.Visibility = useViewTools ? Visibility.Visible : Visibility.Hidden;
+
+			SetupListViewThumbnails();
+			//listViewThumbnails.Background = Brushes.White;
+			listViewThumbnails.BorderThickness = new Thickness(0);
+			//listViewThumbnails.DisplayMemberPath = $"{NotifiedPropertyType.BitmapThumbnail}";
+			listViewThumbnails.SelectionChanged += (o, e) => {	};
+
+			splitter.Width = 5;
+			splitter.HorizontalAlignment = HorizontalAlignment.Center;
+			splitter.VerticalAlignment = VerticalAlignment.Stretch;
+			splitter.Background = appBrush;
+			splitter.DragCompleted += (o, e) =>
+			{
+				var ad = splitContainerPage.ColumnDefinitions[0].ActualWidth;
+
+				if (ad > 0)
+				{
+					IsButtonShowThumbnailsOn = true;
+				}
+				else
+				{
+					buttonShowThumbnails.Background = SystemColors.ControlBrush;
+					isButtonShowThumbnailsOn = false;
+				}
+			};
+
+			panelView.Background = Brushes.White;
+
+			SetGridElement(
+				splitContainerPage, listViewThumbnails,
+				new GridLength(100, GridUnitType.Pixel), true, 0);
+			SetGridElement(
+				splitContainerPage, splitter,
+				new GridLength(5, GridUnitType.Pixel), true, 1);
+			SetGridElement(
+				splitContainerPage, panelView,
+				new GridLength(75, GridUnitType.Star), true, 2);
+
+			splitContainerPage.Margin = standardThickness;
+
+			SetGridElement(
+				tableLayoutPanelMain, flowLayoutPanelSaveTools,
+				GridLength.Auto, true, 0);
+			SetGridElement(
+				tableLayoutPanelMain, flowLayoutPanelViewTools,
+				GridLength.Auto, true, 1);
+			SetGridElement(
+				tableLayoutPanelMain, splitContainerPage,
+				new GridLength(100, GridUnitType.Star), true, 2);
+			SetGridElement(
+				tableLayoutPanelMain, flowLayoutPanelInfoTools,
+				GridLength.Auto, true, 3);
+
+			this.Content = tableLayoutPanelMain;
+		}
+
+		private void SetupButton(Button button, string text, byte[] bytes, string tooltip)
+		{
+			TextBlock textBlock = null;
+			
+			if (!string.IsNullOrEmpty(text))
+			{
+				textBlock = new TextBlock() { Text = text};
+			}
+
+			Image image = null;
+
+			if (bytes is not null && bytes.Any())
+			{
+				BitmapImage bitmap = new BitmapImage();
+				using MemoryStream stream = new MemoryStream(bytes);
+				bitmap.BeginInit();
+				bitmap.StreamSource = stream;
+				bitmap.CacheOption = BitmapCacheOption.OnLoad;
+				bitmap.EndInit();
+				bitmap.Freeze();
+				image = new Image { Source = bitmap, Stretch = Stretch.Uniform, UseLayoutRounding = true, Margin = standardThickness};
+				RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.NearestNeighbor);
+			}
+
+			StackPanel stackPanel = new StackPanel { Orientation = Orientation.Horizontal };
+
+			if (image is not null)
+			{
+				stackPanel.Children.Add(image);
+			}
+
+			if (textBlock is not null)
+			{
+				stackPanel.Children.Add(textBlock);
+			}
+
+			button.Background = SystemColors.ControlBrush;
+			button.HorizontalAlignment = System.Windows.HorizontalAlignment.Center;
+			button.BorderThickness = new Thickness(0);
+			button.Padding = standardThickness;
+			button.Margin = standardThickness;
+			button.Content = stackPanel;
+
+			if (!string.IsNullOrEmpty(tooltip))
+			{
+				button.ToolTip = tooltip;
+			}
+		}
+
+		private static void SetGridElement(Grid grid, FrameworkElement element, GridLength lenght, bool isColumn, int position)
+		{
+			if (isColumn)
+			{
+				ColumnDefinition column = new ColumnDefinition();
+				column.Width = lenght;
+				grid.ColumnDefinitions.Add(column);
+				Grid.SetColumn(element, position);
+			}
+			else
+			{
+				RowDefinition row = new RowDefinition();
+				row.Height = lenght;
+				grid.RowDefinitions.Add(row);
+				Grid.SetRow(element, position);
+			}
+
+			if (!grid.Children.Contains(element))
+			{
+				grid.Children.Add(element);
+			}
+		}
+
+
+		private void SetupListViewThumbnails()
+		{
+			// Включаем виртуализацию, но в стандартном режиме, чтобы элементы четко создавались под экран
+			VirtualizingPanel.SetIsVirtualizing(listViewThumbnails, true);
+			VirtualizingPanel.SetVirtualizationMode(listViewThumbnails, VirtualizationMode.Standard);
+
+			// Самый глупый шаблон: просто выделяем место 120х120 под картинку. Источник (Source) пуст!
+			FrameworkElementFactory imageFactory = new FrameworkElementFactory(typeof(Image));
+			imageFactory.SetValue(Image.WidthProperty, 120.0);
+			imageFactory.SetValue(Image.HeightProperty, 120.0);
+			imageFactory.SetValue(Image.StretchProperty, Stretch.Uniform);
+			// Присваиваем имя, чтобы потом легко найти этот Image внутри контейнера строки
+			imageFactory.SetValue(FrameworkElement.NameProperty, "PagePreviewImage");
+			// 1. Включаем жесткое выравнивание по пикселям (убирает размытие границ элементов)
+			imageFactory.SetValue(UIElement.SnapsToDevicePixelsProperty, true);
+
+			// 2. Оптимизируем режим рендеринга краев (делает картинку четкой)
+			imageFactory.SetValue(RenderOptions.EdgeModeProperty, EdgeMode.Aliased);
+
+			// 3. Выбираем качественный алгоритм масштабирования (HighQuality или NearestNeighbor для мелких превью)
+			imageFactory.SetValue(RenderOptions.BitmapScalingModeProperty, BitmapScalingMode.HighQuality);
+			listViewThumbnails.ItemTemplate = new DataTemplate { VisualTree = imageFactory };
+
+			//FrameworkElementFactory panelFactory = new FrameworkElementFactory(typeof(WrapPanel));
+
+			//// (Опционально) Задаем ориентацию WrapPanel (по умолчанию Horizontal)
+			//panelFactory.SetValue(WrapPanel.OrientationProperty, Orientation.Horizontal);
+
+			//// Устанавливаем новую панель в ListView
+			//listViewThumbnails.ItemsPanel = new ItemsPanelTemplate(panelFactory);
+
+			//// 3. Создаем шаблон для самой плитки (как выглядит один элемент)
+			//DataTemplate itemTemplate = new DataTemplate();
+			//FrameworkElementFactory borderFactory = new FrameworkElementFactory(typeof(Border));
+
+			//// Настраиваем внешний вид плитки
+			//borderFactory.SetValue(Border.WidthProperty, 100.0);
+			//borderFactory.SetValue(Border.HeightProperty, 100.0);
+			//borderFactory.SetValue(Border.MarginProperty, new Thickness(5));
+			//borderFactory.SetValue(Border.BackgroundProperty, Brushes.LightBlue);
+			//borderFactory.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
+
+			//// Добавляем текст внутрь плитки
+			//FrameworkElementFactory textFactory = new FrameworkElementFactory(typeof(TextBlock));
+			//textFactory.SetValue(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+			//textFactory.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center);
+
+			//// Привязываем текст к данным (если в списке просто строки, оставляем путь пустым или ".")
+			//textFactory.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding("."));
+
+			//// Собираем шаблон воедино
+			//borderFactory.AppendChild(textFactory);
+			//itemTemplate.VisualTree = borderFactory;
+
+			//// Применяем шаблон к ListView
+			//listViewThumbnails.ItemTemplate = itemTemplate;
+
+
+
+
+
+
+
+			// Настраиваем таймер остановки скроллинга
+			_scrollDebounceTimer = new DispatcherTimer(DispatcherPriority.Background);
+			_scrollDebounceTimer.Interval = TimeSpan.FromMilliseconds(200); // 200мс вполне достаточно
+			_scrollDebounceTimer.Tick += (s, e) =>
+			{
+				_scrollDebounceTimer.Stop();
+				RenderVisibleItemsManually(); // Ручной запуск отрисовки при остановке
+			};
+
+			// Подписываемся на скроллинг — просто сбрасываем таймер
+			listViewThumbnails.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((s, e) =>
+			{
+				if (e.VerticalChange != 0)
+				{
+					_scrollDebounceTimer.Stop();
+					_scrollDebounceTimer.Start();
+				}
+			}));
+
+			listViewThumbnails.SizeChanged += (s, e) =>
+			{
+				_scrollDebounceTimer.Stop();
+				_scrollDebounceTimer.Start();
+			};
+
+			listViewThumbnails.Background = Brushes.AliceBlue;
+		}
+
+		private void BindNewImageModel(ImageModel newImageModel)
+		{
+			if (newImageModel == null || newImageModel.PagesAll == null || !newImageModel.PagesAll.Any())
+			{
+				listViewThumbnails.ItemsSource = null;
+				return;
+			}
+
+			_scrollDebounceTimer.Stop();
+			// 1. Просто присваиваем новую коллекцию страниц в ItemsSource
+			listViewThumbnails.ItemsSource = newImageModel.PagesAll;
+
+			// 2. Получаем стандартное представление (View) для этой конкретной коллекции
+			// WPF автоматически кэширует его, это не ломает виртуализацию
+			ICollectionView view = CollectionViewSource.GetDefaultView(newImageModel.PagesAll);
+
+			// 3. Очищаем старые правила (если они были) и задаем новые
+			//view.Filter = null;
+			//view.SortDescriptions.Clear();
+
+			// Условие 1: Фильтрация удаленных страниц
+			view.Filter = (obj) => obj is PageModel page && !page.IsDeleted;
+			view.SortDescriptions.Clear();
+			// Условие 2: Сортировка по текущему индексу
+			view.SortDescriptions.Add(new SortDescription($"{NotifiedPropertyType.PageNumberCurrent}", ListSortDirection.Ascending));
+			view.Refresh();
+			// Даем WPF один такт процессора, чтобы обновить разметку (Layout), 
+			// после чего принудительно подгружаем миниатюры для первых видимых страниц
+			listViewThumbnails.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
+			{
+				RenderVisibleItemsManually();
+			}));
+		}
+
+		private void RenderVisibleItemsManually()
+		{
+			if (
+				VisualTreeHelper.GetChildrenCount(listViewThumbnails) > 0 &&
+				VisualTreeHelper.GetChild(listViewThumbnails, 0) is Decorator d &&
+				d.Child is ScrollViewer scrollViewer)
+			{
+				int firstVisibleIdx = (int)scrollViewer.VerticalOffset;
+				int visibleCount = (int)scrollViewer.ViewportHeight;
+
+				for (int i = firstVisibleIdx; i <= firstVisibleIdx + visibleCount + 1; i++)
+				{
+					if (
+						i >= 0 && i < listViewThumbnails.Items.Count &&
+						listViewThumbnails.Items[i] is PageModel pm &&
+						listViewThumbnails.ItemContainerGenerator.ContainerFromIndex(i) is ListViewItem lvi &&
+						lvi.FindVisualChildByName<Image>("PagePreviewImage") is Image imgControl)
+					{
+						TriggerManualLoad(pm, imgControl);
+					}
+				}
+			}
+		}
+
+		private async void TriggerManualLoad(PageModel page, Image targetImage)
+		{
+			_ = this.Dispatcher.BeginInvoke(new Action(async () =>
+			{
+				if (targetImage.DataContext == page)
+				{
+					targetImage.Source = await page.GetBitmapThumbnailAsync();
+				}
+			}));
+		}
+	}
+}

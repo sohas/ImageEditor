@@ -1,0 +1,89 @@
+﻿using System.Drawing;
+using System.Linq;
+using ImageEditorControl.Models;
+using ImageEditorControl.Models.TiffAnnotations;
+
+namespace ImageEditorControl.Undo
+{
+	public class UndoTiffAnnotationEdit(TiffAnnotationModel am, string group, Rectangle? bounds, Color? rgbColor1, Color? rgbColor2, string text, Font font) : UndoAbstract(am?.PageModelParent)
+	{
+		public TiffAnnotationModel Am { get; private set; } = am;
+		private readonly string group = group;
+		private readonly Rectangle? bounds = bounds;
+		private readonly Color? rgbColor1 = rgbColor1;
+		private readonly Color? rgbColor2 = rgbColor2;
+		private readonly string text = text;
+		private readonly Font font = font;
+		public override bool NeedToRedrawPagePreview => true;
+
+		public override void Undo()
+		{
+			if (Am is not null && pm is not null)
+			{
+				Am.TiffAnnotationItem.OiGroup = group;
+
+				if (bounds is Rectangle b)
+				{
+					Am.TiffAnnotationItem.LrBounds = b;
+				}
+
+				if (rgbColor1 is Color c1)
+				{
+					Am.TiffAnnotationItem.RgbColor1 = c1;
+				}
+
+				if (rgbColor2 is Color c2)
+				{
+					Am.TiffAnnotationItem.RgbColor2 = c2;
+				}
+
+				if (text is string t)
+				{
+					if (Am.TiffAnnotationItem.OiAnText_OIAN_TEXTPRIVDATA is null)
+					{
+						Am.TiffAnnotationItem.OiAnText_OIAN_TEXTPRIVDATA = new OIAN_TEXTPRIVDATA();
+					}
+
+					Am.TiffAnnotationItem.OiAnText_OIAN_TEXTPRIVDATA.SzAnoText = t;
+					Am.TiffAnnotationItem.OiAnText_OIAN_TEXTPRIVDATA.UAnoTextLength = (uint)(t is null ? 0 : t.Length);
+				}
+
+				if (font is Font f)
+				{
+					Am.TiffAnnotationItem.LfFont = new LOGFONTA(f);
+				}
+
+				SelectPageModel();
+			}
+		}
+
+		public override UndoAbstract MakeUndoCloneUnsafe(ImageModel imageModelClone)
+		{
+			if (pm is not null && Im is not null)
+			{
+				var pmClone = imageModelClone.GetPageModelByPageNumberInitial(pm.PageNumberInitial);
+				var amClone = pmClone.TiffAnnotations.FirstOrDefault(x => x.Index == Am.Index);
+				amClone.TiffAnnotationItem.Tune(Am.TiffAnnotationItem);
+
+				if (pmClone is not null && amClone is not null)
+				{
+					return new UndoTiffAnnotationEdit(amClone, group, bounds, rgbColor1, rgbColor2, text, font);
+				}
+			}
+
+			return new UndoStop();
+		}
+
+		public override UndoAbstract MakeRedoObject()
+		{
+			var g = Am.TiffAnnotationItem.OiGroup;
+			var b = Am.TiffAnnotationItem.LrBounds;
+			var c1 = Am.TiffAnnotationItem.RgbColor1;
+			var c2 = Am.TiffAnnotationItem.RgbColor2;
+			var t = Am.TiffAnnotationItem.OiAnText_OIAN_TEXTPRIVDATA?.SzAnoText;
+			var f = Am.TiffAnnotationItem.LfFont?.GetFont();
+
+			return new UndoTiffAnnotationEdit(Am, g, b, c1, c2, t, f);
+		}
+	}
+}

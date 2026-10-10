@@ -1,0 +1,33 @@
+﻿using ImageEditorControl.Models;
+
+namespace ImageEditorControl.Undo
+{
+	public class UndoPageRestore(IEnumerable<PageModel> pms) : UndoAbstract(pms.LastOrDefault())
+	{
+		private readonly List<PageModel> pms = [..pms];
+
+		public override void Undo()
+		{
+			foreach (var p in this.pms)
+			{
+				if (p is not null && p.ImageModelParent.PagesChosen.Contains(p))
+				{
+					p.ImageModelParent.DeletePage(p);
+				}
+
+				var newPm = pm.ImageModelParent.GetNextPageModel(pm);
+
+				if (newPm is not null && !newPm.IsSelectedSingle)
+				{
+					newPm.IsSelectedSingle = true;
+				}
+			}
+		}
+
+		public override UndoAbstract MakeUndoCloneUnsafe(ImageModel imageModelClone) =>
+			new UndoPageRestore(pms.Select(x => imageModelClone.GetPageModelByPageNumberInitial(x.PageNumberInitial)));
+
+		public override UndoAbstract MakeRedoObject() => new UndoPageDelete(pms);
+		public bool IsMultiple => pms.Count > 1;
+	}
+}

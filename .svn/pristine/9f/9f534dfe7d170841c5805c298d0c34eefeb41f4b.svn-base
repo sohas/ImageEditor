@@ -1,0 +1,23 @@
+﻿using System.Collections;
+using System.Windows.Controls;
+
+namespace ImageEditorControl.UIs
+{
+	public class ListViewComparer(Func<ListViewItem, ListViewItem, int> comparer = null) //: IComparer
+	{
+		//private readonly Func<ListViewItem, ListViewItem, int> comparer =
+		//	comparer is null ?
+		//	(a, b) => a.Index.CompareTo(b.Index) :
+		//	comparer;
+
+		//public int Compare(object x, object y)
+		//{
+		//	if (x is ListViewItem lviX && y is ListViewItem lviY)
+		//	{
+		//		return comparer(lviX, lviY);
+		//	}
+
+		//	throw new ArgumentException("wrong type to compare");
+		//}
+	}
+}

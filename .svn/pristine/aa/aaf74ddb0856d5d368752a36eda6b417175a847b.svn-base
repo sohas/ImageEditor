@@ -1,0 +1,21 @@
+﻿using OperationDispatcher;
+
+namespace ImageEditorControl.Tools
+{
+	public class ImageOperationID(ImageOperationType operationType, string comment) : IID
+	{
+		public ImageOperationType OperationType => operationType;
+		public string Comment => comment;
+		public DateTime StartTime => DateTime.Now;
+	}
+
+	public enum ImageOperationType
+	{
+		None,
+		BuildImageModel,
+		LoadImageModel,
+		SaveImageModel,
+		DeletePage,
+		BuildThumbnail,
+	}
+}

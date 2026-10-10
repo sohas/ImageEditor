@@ -1,0 +1,18 @@
+﻿using OperationDispatcher;
+
+namespace ImageEditorControl.Tools
+{
+	public class ImageOperationID(ImageOperationType operationType) : IID
+	{
+		public ImageOperationType OperationType => operationType;
+	}
+
+	public enum ImageOperationType
+	{
+		None,
+		BuildImageModel,
+		LoadImageModel,
+		SaveImageModel,
+		DeletePage,
+	}
+}

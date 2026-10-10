@@ -1,0 +1,1925 @@
+﻿using System.IO;
+using System.Windows.Media.Imaging;
+using BitMiracle.LibTiff.Classic;
+//using itst = iTextSharp.text;
+using ImageEditorControl.Models.TiffAnnotations;
+using ImageEditorControl.Undo;
+using ImageEditorControl.States;
+using ImageEditorControl.Tools;
+using System.ComponentModel;
+using System.Windows;
+using Docnet.Core;
+using Docnet.Core.Models;
+using System.Windows.Media;
+using Size = System.Windows.Size;
+using System.Security.Policy;
+using System.Diagnostics;
+using ImageEditorControl.ImageReaders.Pdf;
+using ImageEditorControl.ImageReaders;
+using ImageEditorControl.Readers;
+using ImageEditorControl.ImageReaders.Tiff;
+
+
+
+namespace ImageEditorControl.Models
+{
+	/// <summary>
+	/// модель отображения файла-изображения в редакторе DocumentImageEditor
+	/// </summary>
+	public class ImageModel : IDisposable, INotifyPropertyChanged
+	{
+		private readonly List<PageModel> pagesAll = new List<PageModel>();
+		public int PagesAllCount => pagesAll.Count;
+		private readonly HashSet<PageModel> pagesChosen = new HashSet<PageModel>();
+		public int PagesChosenCount => pagesChosen.Count;
+		private readonly Dictionary<int, PageModel> pagesByCurrentPageNumber = new Dictionary<int, PageModel>();
+		private readonly object pagesLocker = new object();
+		private readonly List<ImageModel> imageModelsExtra = new List<ImageModel>();
+		private readonly Stack<UndoAbstract> undos = new Stack<UndoAbstract>();
+		private readonly Stack<UndoAbstract> redos = new Stack<UndoAbstract>();
+		private readonly ILogger logger = null;
+		private readonly SourceType sourceType;
+		private readonly List<BitmapSource> scanPagesInitial = null;
+		private IImageReader imageReader;
+
+		private readonly int modelNumber = 0;
+		private readonly string documentNameOrigin;
+		private readonly ImageModel imageModelParent = null;
+
+		private FileInfo fileInfo;
+		private byte[] fileBytes;
+		private ImageFileFormat imageFileFormatOrigin = ImageFileFormat.Unknown;
+		private ImageFileFormat imageFileFormatChosen = ImageFileFormat.Unknown;
+		private string documentNameChosen;
+		private int count = 0;
+		private bool disposedValue;
+		private bool isSaving = false;
+		private long isReseting = 0;
+
+		public static TiffTag OIAN_MARK_ATTRIBUTES => (TiffTag)32932;
+		public static Size ThumbnailSize => new Size(110, 110);
+		public static int ThumbnailMargin => 8;
+		public static MonitorSizes MonitorSizes => ScreenMesurer.GetPhysicalDisplaySize();
+		public static int PdfResolution => 200;
+		public static int PdfResolutionForThumbnail => 18;
+
+		public SourceType SourceType => sourceType;
+		public byte[] FileBytes => fileBytes;
+		public string FileNameFull => sourceType == SourceType.FileSource ? fileInfo?.FullName : documentNameOrigin;
+		public string DocumentNameOrigin => documentNameOrigin;
+		public ImageFileFormat ImageFileFormatOrigin => imageFileFormatOrigin;
+		public bool IsExtra => imageModelParent is not null;
+		public bool IsPlainImage =>
+			imageFileFormatOrigin == ImageFileFormat.Jpg ||
+			imageFileFormatOrigin == ImageFileFormat.Png ||
+			imageFileFormatOrigin == ImageFileFormat.Gif ||
+			imageFileFormatOrigin == ImageFileFormat.Bmp;
+		//public HashSet<PageModel> PagesChosen => pagesChosen;
+		public List<PageModel> PagesChosen
+		{
+			get
+			{
+				var res = new List<PageModel>();
+
+				lock (pagesLocker)
+				{
+					res = [.. pagesAll.Where(x => !x.IsDeleted).OrderBy(x => x.PageNumberCurrent)];
+				}
+
+				return res;
+			}
+		}
+
+		public List<PageModel> PagesAll => pagesAll;
+
+		public List<PageModel> PagesSelectedMultiple
+		{
+			get
+			{
+				var res = new List<PageModel>();
+
+				lock (pagesLocker)
+				{
+					res = [.. pagesChosen.Where(x => x.IsSelectedMultiple)];
+				}
+
+				return res;
+			}
+		}
+
+		public List<PageModel> PagesNOTSelectedMultiple
+		{
+			get
+			{
+				var res = new List<PageModel>();
+
+				lock (pagesLocker)
+				{
+					res = [.. pagesChosen.Where(x => !x.IsSelectedMultiple)];
+				}
+
+				return res;
+			}
+		}
+
+		public PageModel GetPageModelByPageNumberInitial(int index)
+		{
+			lock (pagesLocker)
+			{
+				return pagesAll.FirstOrDefault(x => x.PageNumberInitial == index);
+			}
+		}
+
+		public Dictionary<int, PageModel> PagesByCurrentPageNumber => pagesByCurrentPageNumber;
+		public ImageModel ImageModelParent => imageModelParent;
+		public List<ImageModel> ImageModelsExtra => imageModelsExtra;
+		public Stack<UndoAbstract> Undos => undos;
+		public Stack<UndoAbstract> Redos => redos;
+		public UndoAbstract UndoObjectCurrent { get; set; } = null;
+		public List<BitmapSource> ScanPagesInitial => scanPagesInitial;
+		public ILogger Logger => logger;
+		public IImageReader ImageReader => imageReader;
+
+		public int Count => count;
+		public int ModelNumber => modelNumber;
+		public bool ImageFailed => imageFileFormatOrigin == ImageFileFormat.Unknown;
+		public FileInfo FileInfo => fileInfo;
+		public bool FileError => fileInfo is null || !fileInfo.Exists;
+		public bool IsSaving => isSaving;
+		public bool IsReseting => Interlocked.Read(ref isReseting) == 1;
+		public bool IsDisposing => disposedValue;
+		public bool HasBeenModified => undos.Any() || imageFileFormatChosen != imageFileFormatOrigin || PagesChosen.Any(x => x.ColorizeChanged);
+
+		public bool IsSelectedMultiple
+		{
+			get
+			{
+				var res = false;
+
+				lock (pagesLocker)
+				{
+					res = pagesAll.Any(x => x.IsSelectedMultiple);
+				}
+
+				return res;
+			}
+		}
+
+		public bool HasStamps
+		{
+			get
+			{
+				bool res = false;
+
+				lock (pagesLocker)
+				{
+					res = pagesAll.Any(x => x.HasStamps);
+				}
+
+				return res;
+			}
+		}
+
+		public bool HasTitles
+		{
+			get
+			{
+				var res = false;
+
+				lock (pagesLocker)
+				{
+					res = pagesAll.Any(x => x.HasTitles);
+				}
+
+				return res;
+			}
+		}
+
+		public ImageFileFormat ImageFileFormatChosen
+		{
+			get => imageFileFormatChosen;
+			set
+			{
+				imageFileFormatChosen = value;
+				ImageFileFormatChanged?.Invoke(this, EventArgs.Empty);
+			}
+		}
+
+		public string DocumentNameChosen
+		{
+			get => documentNameChosen;
+			set
+			{
+				documentNameChosen = value;
+				OnPropertyChanged(NotifiedPropertyType.DocumentNameChosen);
+				DocumentNameChanged?.Invoke(this, EventArgs.Empty);
+			}
+		}
+
+		public EventHandler ChosenPagesChanged;
+		public EventHandler SelectedMultiplePagesChanged;
+		public EventHandler DocumentNameChanged;
+		public EventHandler ImageFileFormatChanged;
+
+		public event PropertyChangedEventHandler? PropertyChanged;
+
+		public void OnPropertyChanged(NotifiedPropertyType type) =>
+			PropertyChanged?.Invoke(this, new PropertyChangedEventArgs($"{type}"));
+
+		public void OnPropertyChanged(PropertyChangedEventArgs e) =>
+			PropertyChanged?.Invoke(this, e);
+
+		#region static
+		/// <summary>
+		/// регистрация TiffTag, не определённого в BitMirecle
+		/// </summary>
+		static ImageModel() => Tiff.SetTagExtender(Create_OIAN_MARK_ATTRIBUTES);
+
+		/// <summary>
+		/// создание TiffTag, не определённого в BitMirecle
+		/// </summary>
+		/// <param name="tif"></param>
+		private static void Create_OIAN_MARK_ATTRIBUTES(Tiff tif)
+		{
+			var tiffFieldInfo = new TiffFieldInfo(
+				OIAN_MARK_ATTRIBUTES,
+				-3,
+				-3,
+				TiffType.BYTE,
+				FieldBit.Custom,
+				true,
+				true,
+				"OIAN_MARK_ATTRIBUTES");
+
+			TiffFieldInfo[] tiffFieldInfos = { tiffFieldInfo, };
+			tif.MergeFieldInfo(tiffFieldInfos, tiffFieldInfos.Length);
+		}
+		#endregion
+
+		private ImageModel(string fileName, SourceType sourceType, ImageModel parent, CancellationToken ct, ILogger logger, string documentNameOrigin)
+		{
+			this.sourceType = sourceType;
+			this.logger = logger;
+			this.fileBytes = File.ReadAllBytes(fileName);
+			this.fileInfo = new FileInfo(fileName);
+			this.imageModelParent = parent;
+
+			this.documentNameOrigin =
+				string.IsNullOrEmpty(documentNameOrigin) ?
+				fileInfo.Name.Substring(0, fileInfo.Name.Length - fileInfo.Extension.Length) :
+				documentNameOrigin;
+
+			if (ct.IsCancellationRequested)
+			{
+				return;
+			}
+
+			this.DocumentNameChosen = this.documentNameOrigin;
+
+			if (!(parent is null))
+			{
+				this.pagesAll = parent.pagesAll;
+				this.pagesChosen = parent.pagesChosen;
+				this.pagesByCurrentPageNumber = parent.pagesByCurrentPageNumber;
+				this.modelNumber = parent.imageModelsExtra.Count + 1;
+			}
+
+			TryReadFile(fileBytes, ct);
+		}
+
+		/// <summary>
+		/// модель отображения файла-изображения в редакторе DocumentImageEditor
+		/// </summary>
+		/// <param name="fileName">имя файла</param>
+		/// <param name="logger">экземпляр класса логирования</param>
+		/// <param name="documentNameOrigin">имя документа (может не совпадать с именем файла)</param>
+		public ImageModel(string fileName, CancellationToken ct, ILogger logger = null, string documentNameOrigin = null)
+		{
+			if (File.Exists(fileName))
+			{
+				this.sourceType = SourceType.FileSource;
+				this.logger = logger;
+				this.fileBytes = File.ReadAllBytes(fileName);
+				this.fileInfo = new FileInfo(fileName);
+
+				this.documentNameOrigin =
+					string.IsNullOrEmpty(documentNameOrigin) ?
+					fileInfo.Name.Substring(0, fileInfo.Name.Length - fileInfo.Extension.Length) :
+					documentNameOrigin;
+
+				this.DocumentNameChosen = this.documentNameOrigin;
+
+				if (ct.IsCancellationRequested)
+				{
+					return;
+				}
+
+				TryReadFile(this.fileBytes, ct);
+			}
+
+			//GC.Collect();
+			//GC.WaitForPendingFinalizers();
+		}
+
+		/// <summary>
+		/// модель отображения файла-изображения в редакторе DocumentImageEditor
+		/// </summary>
+		/// <param name="fileBytes">байты файла</param>
+		/// <param name="logger">экземпляр класса логирования</param>
+		/// <param name="documentNameOrigin">имя документа</param>
+		public ImageModel(byte[] fileBytes, CancellationToken ct, ILogger logger = null, string documentNameOrigin = null)
+		{
+			if (fileBytes.Any())
+			{
+				this.sourceType = SourceType.BytesSource;
+				this.logger = logger;
+				this.fileBytes = fileBytes;
+				this.fileInfo = null;
+				this.documentNameOrigin = documentNameOrigin;
+				this.DocumentNameChosen = this.documentNameOrigin;
+
+				TryReadFile(this.fileBytes, ct);
+			}
+
+			//GC.Collect();
+			//GC.WaitForPendingFinalizers();
+		}
+
+		/// <summary>
+		/// модель отображения файла-изображения в редакторе DocumentImageEditor
+		/// </summary>
+		/// <param name="scanPages">список отсканированных страниц</param>
+		/// <param name="logger">экземпляр класса логирования</param>
+		/// <param name="documentNameOrigin">имя документа (может не совпадать с именем файла)</param>
+		public ImageModel(IEnumerable<BitmapSource> scanPages, CancellationToken ct, ILogger logger = null, string documentNameOrigin = null)
+		{
+			this.sourceType = SourceType.ImagesSource;
+			scanPagesInitial = [.. scanPages.Where(x => x is not null)];
+
+			if (scanPagesInitial.Any())
+			{
+				this.logger = logger;
+				this.fileBytes = null;
+				this.fileInfo = null;
+				this.documentNameOrigin = documentNameOrigin;
+				this.DocumentNameChosen = this.documentNameOrigin;
+
+				foreach (var scanPage in scanPagesInitial)
+				{
+					if (ct.IsCancellationRequested)
+					{
+						return;
+					}
+
+					var pm = new PageModel(this, count++, scanPage);
+					pm.PropertyChanged += (o, e) => OnPropertyChanged(e);
+
+					pagesAll.Add(pm);
+					pagesChosen.Add(pm);
+				}
+
+				OnPropertyChanged(NotifiedPropertyType.PagesAll);
+
+				this.imageFileFormatOrigin = ImageFileFormat.Bmp;
+				this.ImageFileFormatChosen = ImageFileFormat.Tiff;
+			}
+		}
+
+                #region public methods
+                /// <summary>
+                /// 
+                /// </summary>
+                /// <param name="size"></param>
+                public void AddNewPage(Size size)
+                {
+                        lock (pagesLocker)
+                        {
+                                pagesAll.Add(new PageModel(this, count++, size, PdfResolution));
+                        }
+                }
+
+                public void AddNewPage(BitmapFrame frame)
+                {
+                        lock (pagesLocker)
+                        {
+                                pagesAll.Add(new PageModel(this, count++, frame));
+                        }
+                }
+
+                public void AddNewPage(int initialPageNumber, Size pageSizeInPixel, double dpiX, double dpiY, PixelFormat format, BitmapPalette? palette, IEnumerable<TiffAnnotationItem>? tiffAnnotations)
+                {
+                        lock (pagesLocker)
+                        {
+				var pm = new PageModel(this, initialPageNumber, pageSizeInPixel, dpiX, dpiY, format, palette);
+
+				if (tiffAnnotations is not null && tiffAnnotations.Any()) 
+				{
+					pm.SetInitialTiffAnnotations(tiffAnnotations);
+				}
+                                pagesAll.Add(pm);
+                        }
+                }
+
+                /// <summary>
+                /// отменяет все изменения, не перезагружая модель
+                /// </summary>
+                /// <returns>true если успешно</returns>
+                public bool ClearChanges()
+		{
+			try
+			{
+				while (undos.Any())
+				{
+					undos.Pop()?.Undo();
+				}
+
+				redos.Clear();
+
+				ImageFileFormatChosen = imageFileFormatOrigin;
+				DocumentNameChosen = documentNameOrigin;
+
+				lock (pagesLocker)
+				{
+					foreach (var pm in pagesAll)
+					{
+						pm.ColorizeTypeChosen = ColorizeType.Colorize;
+						pm.TiffAnnotationSaveTypeChosen = ExtraObjectsSaveType.Keep;
+						pm.StampSaveTypeChosen = ExtraObjectsSaveType.Burn;
+					}
+				}
+
+				return true;
+			}
+			catch (Exception ex)
+			{
+				logger?.LogException(ex, "cannot clear changes");
+				return false;
+			}
+		}
+
+		/// <summary>
+		/// пересоздаёт модель, отменяя все изменения
+		/// </summary>
+		/// <returns>true если успешно</returns>
+		public bool Reset(CancellationToken ct)
+		{
+			if (IsReseting)
+			{
+				return false;
+			}
+
+			ct.ThrowIfCancellationRequested();
+
+			Interlocked.Exchange(ref isReseting, 1);
+
+			bool res = false;
+
+			try
+			{
+				lock (pagesLocker)
+				{
+					pagesAll.Clear();
+					pagesChosen.Clear();
+					pagesByCurrentPageNumber.Clear();
+					OnPropertyChanged(NotifiedPropertyType.PagesAll);
+				}
+
+				undos.Clear();
+				redos.Clear();
+				count = 0;
+				disposedValue = false;
+				imageModelsExtra.Clear();
+
+				if (sourceType == SourceType.ImagesSource && scanPagesInitial.Any())
+				{
+					lock (pagesLocker)
+					{
+						foreach (var scanPage in scanPagesInitial)
+						{
+							ct.ThrowIfCancellationRequested();
+
+							var pm = new PageModel(this, count++, scanPage);
+							pm.PropertyChanged += (o, e) => OnPropertyChanged(e);
+							pagesAll.Add(pm);
+							pagesChosen.Add(pm);
+						}
+					}
+
+					OnPropertyChanged(NotifiedPropertyType.PagesAll);
+
+					res = true;
+				}
+				else
+				{
+					if (sourceType == SourceType.FileSource && File.Exists(FileNameFull))
+					{
+						if (FileNameFull.IsFileLocked())
+						{
+							var tsc = new TaskCompletionSource<bool>();
+							var waitTask = tsc.Task;
+
+							var timer = new System.Timers.Timer(500);
+							var n = 0;
+
+							timer.Elapsed += (o, e) =>
+							{
+								n++;
+								//либо дожидаемся освобождения файла, либо ждём 500*100 мс
+								if ((!FileNameFull.IsFileLocked() || n > 100) && tsc.TrySetResult(n <= 100))
+								{
+									timer.Stop();
+									timer.Dispose();
+								}
+							};
+
+							timer.Start();
+
+							if (!waitTask.Result)
+							{
+								return false;
+							}
+						}
+
+						fileInfo = new FileInfo(FileNameFull);//пересоздаём файлинфо
+						fileBytes = File.ReadAllBytes(FileNameFull);
+					}
+
+					res = TryReadFile(fileBytes, ct);
+				}
+
+				ChosenPagesChanged?.Invoke(this, EventArgs.Empty);
+				OnPropertyChanged(NotifiedPropertyType.PagesChosen);
+				OnPropertyChanged(NotifiedPropertyType.PagesAll);
+			}
+			catch (Exception ex)
+			{
+				logger?.LogException(ex, "cannot reset file");
+			}
+			finally
+			{
+				Interlocked.Exchange(ref isReseting, 0);
+			}
+
+			return res;
+		}
+
+		/// <summary>
+		/// небезопасно создаёт копию текущей модели изображения с учётом сделанных преобразований
+		/// </summary>
+		/// <param name="settings"></param>
+		/// <param name="getNewName"></param>
+		/// <returns></returns>
+		public ImageModel BuildUnsafeCopy(BuildCopySettings settings, CancellationToken ct, Func<string, string> getNewName = null)
+		{
+			getNewName ??= x => x;
+
+			ImageModel newImageModel =
+				SourceType == SourceType.ImagesSource ?
+				new ImageModel(scanPagesInitial.Select(x =>
+				{
+					var t = x.CloneCurrentValue();
+					t.Freeze();
+					return t;
+				}), ct, logger, getNewName(documentNameOrigin)) :
+				new ImageModel(fileBytes.GetDeepCopy(), ct, logger, getNewName(documentNameOrigin));
+
+			if (settings.HasFlag(BuildCopySettings.RawCopy))//строим неизменённую модель из основы текущей модели
+			{
+				return newImageModel;
+			}
+
+			if (newImageModel is null || Undos.Any(x => x.GetType() == typeof(UndoExtraModelAdd)))
+			{
+				return null;
+			}
+
+			//воспроизводим все операции
+			var undostTmp = Undos.ToList();
+			undostTmp.Reverse();
+
+			foreach (var undo in undostTmp)
+			{
+				var clone = undo.MakeUndoCloneUnsafe(newImageModel);
+				var redo = clone.MakeRedoObject();
+				redo.Undo();
+				newImageModel.Undos.Push(clone);
+			}
+
+			//удаляем "ненужные" страницы
+			var pagesToDelete =
+				settings.HasFlag(BuildCopySettings.OnlyFragmentSelected) || settings.HasFlag(BuildCopySettings.OnlySelectedSingle) ?
+					[.. GetSortedPages().Where(x => !x.IsSelectedSingle)] :
+				settings.HasFlag(BuildCopySettings.OnlySelectedMultiple) ?
+					PagesNOTSelectedMultiple :
+					[];
+
+			foreach (var pm in pagesToDelete)
+			{
+				var pmNew = newImageModel.GetPageModelByPageNumberInitial(pm.PageNumberInitial);
+				newImageModel.DeletePage(pmNew, false);
+			}
+
+			if (pagesToDelete.Any())
+			{
+				newImageModel.Undos.Push(new UndoPageDelete(pagesToDelete));
+			}
+
+			//указываем выбранную страницу
+			if (
+				GetPageModelCurrent() is PageModel pms &&
+				newImageModel.pagesChosen.FirstOrDefault(x => x.PageNumberInitial == pms.PageNumberInitial) is PageModel pmsNew)
+			{
+				pmsNew.IsSelectedSingle = true;
+
+				if (settings.HasFlag(BuildCopySettings.KeepPageFragmentSelection))
+				{
+					pmsNew.TrySetInnerRectangleDirectly(pms.RectangleSelectionInner);
+				}
+
+				if (settings.HasFlag(BuildCopySettings.OnlyFragmentSelected))
+				{
+					pmsNew.TrySetCropRectangleDirectly(pms.RectangleSelectionInner);
+				}
+			}
+			else if (GetSortedPages() is IEnumerable<PageModel> pages && pages.Any())
+			{
+				pages.First().IsSelectedSingle = true;
+			}
+
+			//мультивыбор
+			if (settings.HasFlag(BuildCopySettings.KeepSelectionMultiple))
+			{
+				foreach (var pm in PagesSelectedMultiple)
+				{
+					if (newImageModel.GetPageModelByPageNumberInitial(pm.PageNumberInitial) is PageModel pmn)
+					{
+						pmn.IsSelectedMultiple = true;
+					}
+				}
+			}
+
+			//настройка параметров отображения и сохранения
+			if (settings.HasFlag(BuildCopySettings.KeepFileFormat))
+			{
+				newImageModel.imageFileFormatChosen = this.imageFileFormatChosen;
+			}
+
+			if (
+				settings.HasFlag(BuildCopySettings.KeepColorizeType) ||
+				settings.HasFlag(BuildCopySettings.BurnTiffAnnotations) ||
+				settings.HasFlag(BuildCopySettings.KeepTiffAnnotationSaveType) ||
+				settings.HasFlag(BuildCopySettings.BurnStamps) ||
+				settings.HasFlag(BuildCopySettings.KeepStampSaveType) ||
+				settings.HasFlag(BuildCopySettings.KeepCropSelection))
+			{
+				lock (pagesLocker)
+				{
+					foreach (var pm in pagesAll)
+					{
+						var pn = newImageModel.GetPageModelByPageNumberInitial(pm.PageNumberInitial);
+
+						if (settings.HasFlag(BuildCopySettings.KeepColorizeType))
+						{
+							pn.ColorizeTypeChosen = pm.ColorizeTypeChosen;
+						}
+
+						if (settings.HasFlag(BuildCopySettings.KeepCropSelection))
+						{
+							pn.TrySetCropRectangleDirectly(pm.RectangleCrop);
+						}
+
+						if (settings.HasFlag(BuildCopySettings.BurnTiffAnnotations))
+						{
+							pn.TiffAnnotationSaveTypeChosen = ExtraObjectsSaveType.Burn;
+						}
+						else if (settings.HasFlag(BuildCopySettings.KeepTiffAnnotationSaveType))
+						{
+							pn.TiffAnnotationSaveTypeChosen = pm.TiffAnnotationSaveTypeChosen;
+						}
+
+						if (settings.HasFlag(BuildCopySettings.BurnStamps))
+						{
+							pn.StampSaveTypeChosen = ExtraObjectsSaveType.Burn;
+						}
+						else if (settings.HasFlag(BuildCopySettings.KeepStampSaveType))
+						{
+							pn.StampSaveTypeChosen = pm.StampSaveTypeChosen;
+						}
+					}
+				}
+			}
+
+			return newImageModel;
+		}
+
+		/// <summary>
+		/// создаёт копию текущей модели изображения с учётом сделанных преобразований.
+		/// выполняется медленно. если нужно сделать полную копию быстро, и в модель не добавлялась экстра-модель, лучше использовать BuildCopyUnsafe
+		/// </summary>
+		/// <param name="settings">параметры копирования</param>
+		/// <returns>копия модели изображения</returns>
+		public ImageModel BuildSnapshotCopy(BuildCopySettings settings, CancellationToken ct)
+		{
+			if (settings.HasFlag(BuildCopySettings.RawCopy))//строим неизменённую модель из основы текущей модели
+			{
+				return
+					SourceType == SourceType.ImagesSource ?
+					new ImageModel(scanPagesInitial, ct, logger, documentNameOrigin) :
+					new ImageModel(fileBytes, ct, logger, documentNameOrigin);
+			}
+
+			var pagesToDelete = new List<PageModel>();
+
+			if (settings.HasFlag(BuildCopySettings.OnlyFragmentSelected))//удаляем все страницы кроме текущей
+			{
+				pagesToDelete = [.. GetSortedPages().Where(x => !x.IsSelectedSingle)];
+
+				foreach (var pm in pagesToDelete)
+				{
+					DeletePage(pm, false);
+				}
+			}
+			else if (settings.HasFlag(BuildCopySettings.OnlySelectedMultiple))//удаляем все страницы кроме выделенных множественным выбором
+			{
+				pagesToDelete = [.. GetSortedPages().Where(x => !x.IsSelectedMultiple)];
+
+				foreach (var pm in pagesToDelete)
+				{
+					DeletePage(pm, false);
+				}
+			}
+
+			var sortedPagesInitial = GetSortedPages().ToList();//страницы, из которых построится новая модель, упорядоченные
+
+			if (!sortedPagesInitial.Any())
+			{
+				foreach (var pm in pagesToDelete)//возвращаем удалённое
+				{
+					RestorePage(pm, false);
+				}
+
+				return null;
+			}
+
+			var stampsSaveType = new Dictionary<int, ExtraObjectsSaveType>();
+			var tiffAnnotationsSaveType = new Dictionary<int, ExtraObjectsSaveType>();
+
+			Undos.Push(new UndoStop());//фиктивный undo чтобы иницииировать значение поля HasBeenChanged = true, нужно для корректной обработки штампов
+
+			foreach (var pm in sortedPagesInitial)//обрабатываем штампы и заметки
+			{
+				if (pm.HasStamps)
+				{
+					stampsSaveType[pm.PageNumberSorted] = pm.StampSaveTypeChosen;
+
+					if (settings.HasFlag(BuildCopySettings.BurnStamps))//помечаем штампы на прожиг или открепляем их
+					{
+						pm.StampSaveTypeChosen = ExtraObjectsSaveType.Burn;
+					}
+					else
+					{
+						pm.StampSaveTypeChosen = ExtraObjectsSaveType.Lose;
+					}
+				}
+
+				if (pm.HasTiffAnnotations)
+				{
+					tiffAnnotationsSaveType[pm.PageNumberSorted] = pm.TiffAnnotationSaveTypeChosen;
+
+					if (settings.HasFlag(BuildCopySettings.BurnTiffAnnotations))
+					{
+						pm.TiffAnnotationSaveTypeChosen = ExtraObjectsSaveType.Burn;
+					}
+				}
+			}
+
+			var pageCurrentInitial = GetPageModelCurrent();//текущая выделенная страница
+			var selectedMultiplePageNumbersInitial = sortedPagesInitial//номера страниц, выбранных мультивыбором
+				.Where(x => x.IsSelectedMultiple)
+				.Select(y => y.PageNumberSorted).ToList();
+
+			var lostCurrentPage = pageCurrentInitial is null;
+			var selectedSingleNumberInitial = lostCurrentPage ? 0 : pageCurrentInitial.PageNumberSorted;//номер выделенной страницы
+			var rotateInitial = lostCurrentPage ? RotateType.None : pageCurrentInitial.RotateType;//вращение выделенной страницы перед сохранением
+			var flipXInitial = lostCurrentPage ? FlipXType.None : pageCurrentInitial.FlipXType;//отражение выделенной страницы по X перед сохранением
+			var flipYInitial = lostCurrentPage ? FlipYType.None : pageCurrentInitial.FlipYType;//отражение выделенной страницы по Y перед сохранением
+			var rcInitial = lostCurrentPage ? new Rect() : pageCurrentInitial.RectangleCrop;//прямоугольник обрезки выделенной страницы перед сохранением
+			var riInitial = lostCurrentPage ? new Rect() : pageCurrentInitial.RectangleSelectionInner;//прямоугольник выделения области выделенной страницы перед сохранением 
+			var areaInitial = rcInitial;//прямоугольник выделения области выделенной страницы в координатах прямоугольника обрезки
+			areaInitial.Intersect(riInitial);//пересечение
+			areaInitial.Offset(-rcInitial.Left, -rcInitial.Top);//сдвиг
+
+			if (settings.HasFlag(BuildCopySettings.OnlyFragmentSelected))
+			{
+				pageCurrentInitial.SetCropRectangle();
+			}
+
+			var res = new ImageModel(this.GetImageModelBytes(false, null, new TiffAnnotationView()), ct, this.logger, DocumentNameChosen);
+
+			if (pageCurrentInitial is not null && settings.HasFlag(BuildCopySettings.OnlyFragmentSelected))//отменяем последний кроп
+			{
+				_ = pageCurrentInitial.TrySetCropRectangleDirectly(rcInitial);
+			}
+
+			foreach (var pm in sortedPagesInitial)//восстанавливаем статус штампов
+			{
+				if (stampsSaveType.ContainsKey(pm.PageNumberInitial))
+				{
+					pm.StampSaveTypeChosen = stampsSaveType[pm.PageNumberInitial];
+				}
+			}
+
+			if (!settings.HasFlag(BuildCopySettings.BurnStamps))//очищаем, если штампы сохранились при статусе Lose
+			{
+				foreach (var pm in res.pagesAll)
+				{
+					pm.Stamps.Clear();
+				}
+			}
+
+			foreach (var pm in sortedPagesInitial)//восстанавливаем статус заметок
+			{
+				if (tiffAnnotationsSaveType.ContainsKey(pm.PageNumberInitial))
+				{
+					pm.TiffAnnotationSaveTypeChosen = tiffAnnotationsSaveType[pm.PageNumberInitial];
+				}
+			}
+
+			foreach (var ptr in pagesToDelete)//возвращаем удалённое
+			{
+				RestorePage(ptr, false);
+			}
+
+			Undos.Pop();//убираем последний фиктивный undo
+
+			if (settings.HasFlag(BuildCopySettings.KeepSelectionMultiple))//воспроизводим множественное выделение страниц
+			{
+				foreach (var pn in selectedMultiplePageNumbersInitial)
+				{
+					res.PagesByCurrentPageNumber[pn].IsSelectedMultiple = true;
+				}
+			}
+
+			var pageCurrent = res.PagesByCurrentPageNumber[selectedSingleNumberInitial];
+			pageCurrent.IsSelectedSingle = true;
+
+			if (
+				!lostCurrentPage &&
+				!settings.HasFlag(BuildCopySettings.OnlyFragmentSelected) &&
+				settings.HasFlag(BuildCopySettings.KeepPageFragmentSelection) &&
+				!areaInitial.IsEmpty)//воспроизводим прямоугольник выделения области
+			{
+				pageCurrent.RotateType = (RotateType)((4 - (int)rotateInitial) % 4);//вращаем "обратно"
+				pageCurrent.FlipXType = flipXInitial;
+				pageCurrent.FlipYType = flipYInitial;
+
+				var dMax = Math.Max(pageCurrent.WidthPXLOrigin, pageCurrent.HeightPXLOrigin);
+
+				pageCurrent.SetInnerSelectionRectangle(//устанавливаем прямоугольник
+					new Size(dMax, dMax),
+					DrawSizeType.Custom,
+					1,
+					new Point(),
+					areaInitial);
+
+				pageCurrent.RotateType = RotateType.None;//вращаем в нейтральное положение
+				pageCurrent.FlipXType = FlipXType.None;
+				pageCurrent.FlipYType = FlipYType.None;
+			}
+
+			return res;
+		}
+
+		/// <summary>
+		/// копирует файл по новому пути (существование файла и корректность нового пути не проверяется)
+		/// </summary>
+		/// <param name="newFileName">новый путь</param>
+		/// <returns>true если успех</returns>
+		public bool CopyFile(string newFileName, bool overrwrite)
+		{
+			isSaving = true;
+			bool res;
+
+			try
+			{
+				File.Copy(FileNameFull, newFileName, overrwrite);
+				isSaving = false;
+				res = true;
+			}
+			catch (Exception ex)
+			{
+				logger?.LogException(ex, "cannot copy file");
+				isSaving = false;
+				return false;
+			}
+
+			//GC.Collect();
+			//GC.WaitForPendingFinalizers();
+
+			return res;
+		}
+
+		/// <summary>
+		/// сохраняет модель в файл (новый или соответствующий данной модели или любой extra-модели)
+		/// </summary>
+		/// <param name="newFileName">имя файла сохранения</param>
+		/// <param name="useMark">если true - записывается ссылка на номер в архиве документов или любой другой маркер</param>
+		/// <param name="mark">маркер</param>
+		/// <param name="tav">способ фильтрации заметок</param>
+		/// <param name="testTiffTags">если true, то в случае ошибки копирования/записи tiff тагов при записи файла, не запускается лечение. нужно для тестирования проблемых форматов tiff</param>
+		/// <returns>true если успех</returns>
+		public bool SaveFile(string newFileName, bool useMark, string mark, TiffAnnotationView tav, bool testTiffTags = false)
+		{
+			bool res;
+			isSaving = true;
+
+			try
+			{
+				this.WriteImageModelToFile(newFileName, useMark, mark, tav, testTiffTags);
+				isSaving = false;
+				res = true;
+			}
+			catch (Exception ex)
+			{
+				logger?.LogException(ex, "cannot save file");
+				isSaving = false;
+				res = false;
+			}
+
+			//GC.Collect();
+			//GC.WaitForPendingFinalizers();
+
+			return res;
+		}
+
+		/// <summary>
+		/// получает результат сохранения в виде массива байтов
+		/// </summary>
+		/// <param name="useMark">если true - записывается ссылка на номер в архиве документов или любой другой маркер</param>
+		/// <param name="mark">маркер</param>
+		/// <param name="tav">способ фильтрации заметок</param>
+		/// <returns>массив байтов</returns>
+		public byte[] GetSavedBytes(bool useMark, string mark, TiffAnnotationView tav)
+		{
+			isSaving = true;
+			byte[] res = null;
+
+			try
+			{
+				res = this.GetImageModelBytes(useMark, mark, tav, false);
+				isSaving = false;
+			}
+			catch (Exception ex)
+			{
+				logger?.LogException(ex, "cannot get bytes");
+				isSaving = false;
+			}
+
+			//GC.Collect();
+			//GC.WaitForPendingFinalizers();
+
+			return res;
+		}
+
+		/// <summary>
+		/// добавляет в модель страницы из другого файла (можно из того же самого)
+		/// </summary>
+		/// <param name="extraFileName">имя файла, из которого добавляются страницы</param>
+		/// <param name="pageNumber">номер по порядку страницы данной модели (среди выбранных, начиная с 0), 
+		/// перед которой вставляются страницы из файла. если = -1, то страницы добавляются в конец</param>
+		/// <returns>true if success</returns>
+		public bool AddExtraFile(string extraFileName, CancellationToken ct, int pageNumber = -1)
+		{
+			if (File.Exists(extraFileName))
+			{
+				try
+				{
+					lock (pagesLocker)
+					{
+						var extraModel = new ImageModel(extraFileName, SourceType.FileSource, this, ct, this.logger, null);
+
+						if (extraModel.ImageFailed)
+						{
+							return false;
+						}
+
+						this.imageModelsExtra.Add(extraModel);
+
+						if (pageNumber > -1)//если вставляем не в конец, а перед конкретной страницей
+						{
+							var pages = extraModel.pagesAll;
+							var allCount = pages.Count;
+							var extraCount = extraModel.Count;
+
+							foreach (var pm in pages)
+							{
+								if (ct.IsCancellationRequested)
+								{
+									return false;
+								}
+
+								if (pm.ImageModelParent == extraModel)
+								{
+									pm.SetCurrentPageNumber(pm.PageNumberCurrent - allCount + extraCount + pageNumber);//сдвигаем назад к номеру выбранной страницы
+								}
+								else if (pm.PageNumberCurrent >= pageNumber)//те страницы, перед которыми вставляем
+								{
+									pm.SetCurrentPageNumber(pm.PageNumberCurrent + extraCount);//сдигаем вперёд на чило вставляемых страниц
+								}
+							}
+						}
+					}
+
+					ChosenPagesChanged?.Invoke(this, EventArgs.Empty);
+					OnPropertyChanged(NotifiedPropertyType.PagesChosen);
+
+					return true;
+				}
+				catch (Exception ex)
+				{
+					logger?.LogException(ex, "cannot add extra file");
+					return false;
+				}
+			}
+			else
+			{
+				return false;
+			}
+		}
+
+		/// <summary>
+		/// добавляет в модель страницы из другой модели. можно делать только на финальной стадии перед сохранением. 
+		/// иначе возможны ошибки с моделью
+		/// </summary>
+		/// <param name="extraModel">вставляемая модель</param>
+		/// <param name="pageNumber">номер по порядку страницы данной модели (среди выбранных, начиная с 0), 
+		/// перед которой вставляются страницы из другой модели</param>
+		/// <returns>true if success</returns>
+		public bool AddExtraImageModelManually(ImageModel extraModel, int pageNumber = -1)
+		{
+			if (extraModel is null || extraModel.ImageFailed || !extraModel.PagesChosen.Any())
+			{
+				return false;
+			}
+
+			try
+			{
+				this.imageModelsExtra.Add(extraModel);
+
+				var extraPagesChosen = extraModel.GetSortedPages().ToList();
+				var thisCount = Count;
+				var extraCount = extraPagesChosen.Count;
+
+				var i = 0;
+
+				lock (pagesLocker)
+				{
+					foreach (var pm in extraPagesChosen)//добавили страницы в конец
+					{
+						pm.SetCurrentPageNumber(thisCount + i, false, true);
+						pm.PropertyChanged += (o, e) => OnPropertyChanged(e);
+						pagesAll.Add(pm);
+						pagesChosen.Add(pm);
+						i++;
+					}
+
+					if (pageNumber > -1 && PagesChosen.Count() > pageNumber)//если вставляем не в конец, а перед конкретной страницей
+					{
+						//ищем текущий номер страницы в основной модели, перед которой вставляем страницы экстра
+						var pageNumberInserted = GetSortedPages().ToArray()[pageNumber].PageNumberCurrent;
+
+						foreach (var pm in pagesAll)
+						{
+							if (pm.ImageModelParent == extraModel)
+							{
+								pm.SetCurrentPageNumber(pm.PageNumberCurrent - thisCount + pageNumberInserted, false, true);//сдвигаем назад к номеру выбранной страницы
+							}
+							else if (pm.PageNumberCurrent >= pageNumberInserted)//те страницы, перед которыми вставляем
+							{
+								pm.SetCurrentPageNumber(pm.PageNumberCurrent + extraCount, false, true);//сдигаем вперёд на чило вставляемых страниц
+							}
+						}
+					}
+				}
+
+				undos.Push(new UndoExtraModelAdd(extraModel, pageNumber));
+
+				return true;
+			}
+			catch (Exception ex)
+			{
+				logger?.LogException(ex, "cannot add extra model");
+				return false;
+			}
+		}
+
+		/// <summary>
+		/// полностью удаляет экстра-модель из данной модели. необратимая операция
+		/// </summary>
+		/// <param name="extra">экстра-модель</param>
+		/// <param name="pageNumber">страница, перед которой была добавлена модель. если -1, то модель добавлялась в конец</param>
+		public void RemoveExtraModel(ImageModel extra, int pageNumber)
+		{
+			imageModelsExtra.Remove(extra);
+			var canRemove = true;
+
+			lock (pagesLocker)
+			{
+				while (canRemove)
+				{
+					var extraPage = pagesAll.FirstOrDefault(x => x.ImageModelParent == extra);
+
+					if (extraPage is PageModel pm)
+					{
+						RemovePageConstantly(pm);
+					}
+					else
+					{
+						canRemove = false;
+					}
+				}
+
+				if (pageNumber >= 0)
+				{
+					foreach (var pm in pagesAll)
+					{
+						if (pm.PageNumberCurrent > pageNumber)
+						{
+							pm.SetCurrentPageNumber(pm.PageNumberCurrent - extra.Count, true);
+						}
+					}
+				}
+
+				if (pageNumber >= 0 && this.PagesByCurrentPageNumber.ContainsKey(pageNumber))
+				{
+					this.PagesByCurrentPageNumber[pageNumber].IsSelectedSingle = true;
+				}
+				else if (pagesAll.Any())
+				{
+					this.PagesByCurrentPageNumber[0].IsSelectedSingle = true;
+				}
+			}
+
+			extra.Dispose(true);
+
+			this.count -= extra.count;
+			this.ChosenPagesChanged?.Invoke(this, EventArgs.Empty);
+			OnPropertyChanged(NotifiedPropertyType.PagesChosen);
+		}
+
+		/// <summary>
+		/// поворачивает страницы в соответствии с перечислением углов поворота в градусах
+		/// </summary>
+		/// <param name="rawRotations">углы поворота страниц в градусах</param>
+		public void RotatePages(IEnumerable<RawRotation> rawRotations)
+		{
+			lock (pagesLocker)
+			{
+				foreach (var pageAngle in rawRotations)
+				{
+					var pageNumber = pageAngle.PageNumber;
+
+					if (pagesAll.Count > pageNumber && pagesAll[pageNumber] is PageModel pm)
+					{
+						var startAngle = ((int)pm.RotateType) * 90;
+						var angle = pageAngle.ImageAngle;
+						var nR = ((angle - startAngle) / 90 + 8) % 4;//количество вращений по часовой стрелке
+
+						for (var iR = 0; iR < nR; iR++)
+						{
+							pm.RotateR();
+						}
+					}
+				}
+			}
+		}
+
+		/// <summary>
+		/// сбрасывает повороты всех страниц
+		/// </summary>
+		public void ClearRotations()
+		{
+			lock (pagesLocker)
+			{
+				foreach (var pm in pagesAll)
+				{
+					pm.RotateType = RotateType.None;
+				}
+			}
+		}
+
+		/// <summary>
+		/// временный метод. адаптирует криво записанные заметки. подлежит удалению
+		/// </summary>
+		public void AdaptTiffAnnotations()
+		{
+			lock (pagesLocker)
+			{
+				foreach (var pm in pagesAll)
+				{
+					pm.AdaptTiffAnnotations();
+				}
+			}
+		}
+
+		/// <summary>
+		/// возращает подписи всех заметок на всех страницах
+		/// </summary>
+		/// <returns>подписи всех заметок на всех страницах</returns>
+		public HashSet<String> GetTiffAnnotationOiGroups()
+		{
+			var res = new HashSet<String>();
+
+			lock (pagesLocker)
+			{
+				foreach (var pm in pagesAll)
+				{
+					foreach (var oig in pm.GetTiffAnnotationOiGroups())
+					{
+						res.Add(oig);
+					}
+				}
+			}
+
+			return res;
+		}
+
+		/// <summary>
+		/// ставит надпись на все страницы
+		/// </summary>
+		/// <param name="text">текст надписи</param>
+		/// <param name="clear">true если очищаем старые надписи</param>
+		/// <param name="ha">HorizontalAlignment</param>
+		/// <param name="va">VerticalAlignment</param>
+		public void SetTitleForAllPages(string text, bool clear, TitleHorizontalAlignment ha, TitleVerticalAlignment va)
+		{
+			lock (pagesLocker)
+			{
+				foreach (var pm in pagesAll)
+				{
+					if (clear)
+					{
+						pm.Titles.Clear();
+					}
+
+					if (!string.IsNullOrEmpty(text))
+					{
+						pm.SetTitle(text, ha, va);
+					}
+				}
+			}
+		}
+
+		/// <summary>
+		/// ставит множество штампов
+		/// </summary>
+		/// <param name="stamps">перечисление объектов RawStamp</param>
+		/// <param name="clear">если true, предварительно удалять уже существующие штампы</param>
+		public void SetRawStamps(IEnumerable<RawStamp> stamps, bool clear, bool checkposition = true)
+		{
+			lock (pagesLocker)
+			{
+				if (clear)
+				{
+					pagesAll.ForEach(p => p.Stamps.Clear());
+				}
+
+				foreach (var stamp in stamps)
+				{
+					var stampPage = stamp.PageNumber;
+					var stampX = stamp.XOnRotated;
+					var stampY = stamp.YOnRotated;
+					var stampAngle = stamp.StampAngle;
+
+					if (
+						stamp.Bytes is byte[] stampBytes &&
+						stampPage < pagesAll.Count &&
+						pagesAll[stampPage] is PageModel pm &&
+						true)
+					{
+						var w = pm.WidthPXLOrigin;
+						var h = pm.HeightPXLOrigin;
+						var x = stampX;
+						var y = stampY;
+
+						var imageAngle = stamp.ImageAngle;//угол поворота страницы из базы
+						imageAngle = (imageAngle + 360) % 360; //только 0, 90, 180, 360
+
+						//преобразуем в координаты на НЕ ПОВЁРНУТОМ изображении страницы
+						if (imageAngle == 90)
+						{
+							x = stampY;
+							y = h - stampX;
+						}
+						else if (imageAngle == 180)
+						{
+							x = w - stampX;
+							y = h - stampY;
+						}
+						else if (imageAngle == 270)
+						{
+							x = w - stampY;
+							y = stampX;
+						}
+
+						if (!checkposition || x >= 0 && x < w && y >= 0 && y < h)
+						{
+							//запоминаем изначальное вращение/отражение
+							var initialRotation = pm.RotateType;
+							var initialFlipX = pm.FlipXType;
+							var initialFlipY = pm.FlipYType;
+
+							//обнуляем изначальное вращение/отражение
+							pm.RotateType = RotateType.None;
+							pm.FlipXType = FlipXType.None;
+							pm.FlipYType = FlipYType.None;
+
+							var nR = (imageAngle / 90 + 4) % 4;//количество вращений по часовой стрелке
+
+							for (var iR = 0; iR < nR; iR++)
+							{
+								pm.RotateR();
+							}
+
+							pm.SetStamp(stampBytes, SetStampType.OnLocation, new Point(x, y), stampAngle, stamp.MakeTransparent);
+
+							//возвращаем изначальное вращение/отражение
+							pm.RotateType = initialRotation;
+							pm.FlipXType = initialFlipX;
+							pm.FlipYType = initialFlipY;
+						}
+					}
+				}
+			}
+		}
+
+		/// <summary>
+		/// помечает выбранную страницу на удаление
+		/// </summary>
+		/// <param name="pm"></param>
+		public void DeletePage(PageModel pm, bool raiseEvent = true)
+		{
+			pm.IsSelectedMultiple = false;
+			pm.IsDeleted = true;
+
+			if (pagesChosen.Contains(pm))
+			{
+				pagesChosen.Remove(pm);
+			}
+
+			if (raiseEvent)
+			{
+				ChosenPagesChanged?.Invoke(this, EventArgs.Empty);
+				OnPropertyChanged(NotifiedPropertyType.PagesChosen);
+			}
+		}
+
+		/// <summary>
+		/// возвращает выбранную страницу из удалённых
+		/// </summary>
+		/// <param name="pm"></param>
+		public void RestorePage(PageModel pm, bool raiseEvent = true)
+		{
+			pm.IsDeleted = false;
+
+			if (!pagesChosen.Contains(pm))
+			{
+				pagesChosen.Add(pm);
+			}
+
+			if (raiseEvent)
+			{
+				ChosenPagesChanged?.Invoke(this, EventArgs.Empty);
+				OnPropertyChanged(NotifiedPropertyType.PagesChosen);
+			}
+		}
+
+		/// <summary>
+		/// уже выбранные страницы помечаются на удаление, а помеченные на удаление становятся выбранными
+		/// </summary>
+		public void InvertDeletedPages()
+		{
+			lock (pagesLocker)
+			{
+				var chosen = new HashSet<PageModel>(pagesChosen);//копия страниц на удаление
+
+				foreach (var p in pagesAll)
+				{
+					if (!chosen.Contains(p))
+					{
+						RestorePage(p);
+					}
+					else
+					{
+						DeletePage(p);
+					}
+				}
+			}
+		}
+
+		/// <summary>
+		/// полностью удаляет выбранную страницу
+		/// </summary>
+		/// <param name="pm"></param>
+		private void RemovePageConstantly(PageModel pm)
+		{
+			lock (pagesLocker)
+			{
+				pm.IsSelectedMultiple = false;
+
+				if (pagesChosen.Contains(pm))
+				{
+					pagesChosen.Remove(pm);
+				}
+
+				if (pagesAll.Contains(pm))
+				{
+					pagesAll.Remove(pm);
+				}
+
+				if (pagesByCurrentPageNumber.ContainsKey(pm.PageNumberCurrent))
+				{
+					pagesByCurrentPageNumber.Remove(pm.PageNumberCurrent);
+				}
+			}
+		}
+
+		/// <summary>
+		/// возвращает корректное расширение файла
+		/// </summary>
+		/// <returns>расширение</returns>
+		public string GetExtension() =>
+			ImageFileFormatOrigin == ImageFileFormat.Unknown ?
+			fileInfo.Extension.Trim('.') :
+			ImageFileFormatChosen.ToString();
+
+		/// <summary>
+		/// все страницы кроме выбранной для отображения помечает как не выбранные
+		/// </summary>
+		/// <param name="pm">выбранная для отображения станица</param>
+		public void DeselectSingleAllPagesExceptThis(PageModel pm)
+		{
+			lock (pagesLocker)
+			{
+				foreach (var p in pagesAll.Where(x => x != pm && x.IsSelectedSingle))
+				{
+					p.IsSelectedSingle = false;
+				}
+			}
+		}
+
+		/// <summary>
+		/// выбирает все страницы множественным выбором
+		/// </summary>
+		public void SelectMultipleAllPages()
+		{
+			lock (pagesLocker)
+			{
+				foreach (var p in pagesAll)
+				{
+					p.IsSelectedMultiple = true;
+				}
+			}
+		}
+
+		/// <summary>
+		/// убирает множественный выбор для всех страниц
+		/// </summary>
+		public void DeselectMultipleAllPages()
+		{
+			lock (pagesLocker)
+			{
+				foreach (var p in pagesAll)
+				{
+					p.IsSelectedMultiple = false;
+				}
+			}
+		}
+
+		/// <summary>
+		/// сортирует выбранные страницы в выбранном порядке и возвращает отсортированный список
+		/// </summary>
+		/// <returns>отсортированнный список выбранных страниц</returns>
+		public IEnumerable<PageModel> GetSortedPages()
+		{
+			//var res = PagesChosen.OrderBy(x => x.PageNumberCurrent);
+			var i = 0;
+
+			foreach (var pm in PagesChosen)//устанавливаем сквозную нумерацию без пропусков индексов удалённых страниц
+			{
+				pm.PageNumberSorted = i++;
+				yield return pm;
+			}
+		}
+
+		/// <summary>
+		/// возвращает текущую выбранную страницу
+		/// </summary>
+		/// <returns>текущая выбранная страница</returns>
+		public PageModel GetPageModelCurrent()
+		{
+			PageModel res = null;
+
+			lock (pagesLocker)
+			{
+				res = pagesAll.FirstOrDefault(x => x.IsSelectedSingle);
+			}
+
+			return res;
+		}
+
+		/// <summary>
+		/// возвращает соседнюю (в отсортированном порядке) страницу по отношению к выбранной из списка текущих выбранных страниц
+		/// </summary>
+		/// <param name="pm">page model</param>
+		/// <returns>соседняя страница</returns>
+		public PageModel GetNextPageModel(PageModel pm) => GetNextPageModel(pm, false) ?? GetNextPageModel(pm, true);
+
+		/// <summary>
+		/// возвращает соседнюю (в отсортированном порядке) страницу из списка текущих выбранных страниц
+		/// </summary>
+		/// <param name="pm">page model</param>
+		/// <param name="up">если <see langword="true"/>, то по направлению уменьшение номера</param>
+		/// <returns>соседняя страница</returns>
+		public PageModel GetNextPageModel(PageModel pm, bool up)
+		{
+			PageModel res = null;
+
+			lock (pagesLocker)
+			{
+				var ci = pm.PageNumberCurrent;
+				ci = up ? ci - 1 : ci + 1;
+				var cond = up ? ci >= 0 : ci < pagesAll.Count;
+
+				while (cond)
+				{
+					if (!PagesByCurrentPageNumber.ContainsKey(ci))
+					{
+						return null;
+					}
+
+					res = PagesByCurrentPageNumber[ci];
+
+					if (!pagesChosen.Contains(res))
+					{
+						res = null;
+						ci = up ? ci - 1 : ci + 1;
+						cond = up ? ci >= 0 : ci < pagesAll.Count;
+					}
+					else
+					{
+						break;
+					}
+				}
+			}
+
+			return res;
+		}
+
+		/// <summary>
+		/// применяет выбранные изменения к модели и всем её страницам
+		/// </summary>
+		/// <param name="state">параметры изменения</param>
+		/// <param name="toPages">если true, то для обновления только одной выбранной модели</param>
+		public void ApplyChanges(ApplyChangesState state, bool toPages = false)
+		{
+			if (state.CanApplyToDocuments)
+			{
+				if (
+					state.CanApplyFormatToDocuments && state.ImageFormatChosen is
+					ImageFileFormat iff &&
+					(iff == ImageFileFormat.Tiff || iff == ImageFileFormat.Pdf) &&
+					ImageFileFormatChosen != iff)
+				{
+					ImageFileFormatChosen = iff;
+				}
+
+				foreach (var pm in PagesChosen)
+				{
+					if (
+						state.CanApplyColorizeTypeToDocuments &&
+						state.ColorizeTypeChosen is ColorizeType ct &&
+						!pm.IsBWColorOrigin &&
+						pm.ColorizeTypeChosen != ct)
+					{
+						pm.ColorizeTypeChosen = ct;
+					}
+
+					if (
+						state.CanApplyTiffAnnotationSaveTypeToDocuments &&
+						state.TiffAnnotationSaveTypeChosen is ExtraObjectsSaveType ast &&
+						pm.TiffAnnotationSaveTypeChosen != ast)
+					{
+						pm.TiffAnnotationSaveTypeChosen = ast;
+					}
+
+					if (
+						state.CanApplyStampSaveTypeToDocuments &&
+						state.StampSaveTypeChosen is ExtraObjectsSaveType sst &&
+						pm.StampSaveTypeChosen != sst)
+					{
+						pm.StampSaveTypeChosen = sst;
+					}
+				}
+			}
+
+			if (state.CanApplyToPages && toPages)
+			{
+				foreach (var pm in PagesChosen)
+				{
+					if (
+						state.CanApplyColorizeTypeToPages &&
+						state.ColorizeTypeChosen is ColorizeType ct &&
+						!pm.IsBWColorOrigin &&
+						pm.ColorizeTypeChosen != ct)
+					{
+						pm.ColorizeTypeChosen = ct;
+					}
+
+					if (
+						state.CanApplyTiffAnnotationSaveTypeToPages &&
+						state.TiffAnnotationSaveTypeChosen is ExtraObjectsSaveType ast &&
+						pm.TiffAnnotationSaveTypeChosen != ast)
+					{
+						pm.TiffAnnotationSaveTypeChosen = ast;
+					}
+
+					if (
+						state.CanApplyStampSaveTypeToPages &&
+						state.StampSaveTypeChosen is ExtraObjectsSaveType sst &&
+						pm.StampSaveTypeChosen != sst)
+					{
+						pm.StampSaveTypeChosen = sst;
+					}
+				}
+			}
+		}
+
+		/// <summary>
+		/// Извлекает тексты из страниц изображения в виде списка строк по количеству страниц
+		/// в порядке следования страниц в оригинальном файле (до редактирования). 
+		/// Если нет возможности извлечь или извлечение происходит с ошибкой, возвращается null.
+		/// Если извлечение возможно, но на странице текста нет, строка в списке для этой страницы = null.
+		/// </summary>
+		/// <returns>Список строк</returns>
+		public List<String> ExtractAllPagesText()
+		{
+			List<string> res = null;
+
+			if (ImageFileFormatOrigin == ImageFileFormat.Pdf)
+			{
+				try
+				{
+					res = this.ExtractAllPagesPdfText();
+				}
+				catch (Exception ex)
+				{
+					logger.LogException(ex, "Impossible to extract pages text");
+				}
+			}
+
+			return res;
+		}
+		#endregion
+
+		#region read
+		private bool TryReadFile(byte[] fileBytes, CancellationToken ct)
+		{
+			this.imageFileFormatOrigin = ImageTypeChecker.GetImageFileFormat(fileBytes);
+
+			if (this.ImageFileFormatOrigin == ImageFileFormat.Pdf)
+			{
+				this.imageReader = new ImageReaderPdf();
+				return TryReadPdf(fileBytes, ct);
+			}
+			else if (this.ImageFileFormatOrigin == ImageFileFormat.Tiff)
+			{
+				this.imageReader = new ImageReaderTiff();
+				return TryReadPdf(fileBytes, ct);
+			}
+
+                        return
+					TryReadTiffJpgPngGifBmp(fileBytes, ct) ||
+					false;
+		}
+
+		private bool TryReadPdf(byte[] fileBytes, CancellationToken ct)
+		{
+			try
+			{
+				if (ct.IsCancellationRequested)
+				{
+					return false;
+				}
+
+				if (imageReader.AddPages(this, ct))
+				{
+					foreach (var pm in pagesAll)
+					{
+						pm.PropertyChanged += (o, e) => OnPropertyChanged(e);
+					}
+
+					this.imageFileFormatOrigin = ImageFileFormat.Pdf;
+					this.ImageFileFormatChosen = ImageFileFormat.Pdf;
+
+					return true;
+				}
+
+				return false;
+			}
+			catch (Exception)
+			{
+				return false;
+			}
+			finally
+			{
+				if (this.IsExtra)
+				{
+					imageModelParent.count = pagesAll.Count;
+				}
+			}
+		}
+
+		public bool TryReadAnnotationsFromTiff(byte[] fileBytes, CancellationToken ct)
+		{
+			try
+			{
+				using MemoryStream ms = new MemoryStream(fileBytes);
+				using Tiff image = Tiff.ClientOpen("InMemory", "r", ms, new TiffStream());
+				bool canRead = true;
+				var pageNumber = 0;
+
+				while (canRead)
+				{
+					if (ct.IsCancellationRequested)
+					{
+						return false;
+					}
+
+					var annotTag = image.GetField(OIAN_MARK_ATTRIBUTES);
+
+					if (!(annotTag is null) && annotTag.Length > 1)
+					{
+						var annotationAsBytes = (byte[])annotTag[1].Value;
+						var ta = new DocumentImageTiffAnnotationsModel();
+						ta.CreateAnnotationItemsOnTiffAnnotationBytes(annotationAsBytes);
+						var pm = pagesAll.Where(x => x.ImageModelParent == this && x.PageNumberInitial == pageNumber).First();
+						pm?.SetInitialTiffAnnotations(ta.TiffAnnotationItems.OrderBy(x => x.OiIndex.GetParsedIndex()));
+					}
+
+					canRead = image.ReadDirectory();
+					pageNumber++;
+				}
+
+				return true;
+			}
+			catch (Exception ex)
+			{
+				logger?.LogException(ex, "cannot read tiff annotation");
+				return false;
+			}
+		}
+
+		private bool TryReadTiffJpgPngGifBmp(byte[] fileBytes, CancellationToken ct)
+		{
+			//this.imageFileFormatOrigin = ImageFileFormat.Unknown;
+
+			try
+			{
+				if (ct.IsCancellationRequested)
+				{
+					return false;
+				}
+
+				using var ms = new MemoryStream(fileBytes);
+				//var decoder = ms.FindDecoderForTiffAndPlainImageAndSetFormat(out this.imageFileFormatOrigin);
+				var decoder = ms.GetDecoderForTiffAndPlainImage(this.imageFileFormatOrigin);
+
+				if (decoder is null)
+				{
+					return false;
+				}
+
+				var sw = Stopwatch.StartNew();
+
+				foreach (BitmapFrame frame in decoder.Frames)
+				{
+					if (ct.IsCancellationRequested)
+					{
+						return false;
+					}
+
+					var pm = new PageModel(this, count++, frame);
+					pagesAll.Add(pm);
+				}
+
+				foreach (var pm in pagesAll)//на всякий случай после добавления в коллекцию
+				{
+					pm.PropertyChanged += (o, e) => OnPropertyChanged(e);
+				}
+
+				if (imageFileFormatOrigin == ImageFileFormat.Tiff)
+				{
+					_ = TryReadAnnotationsFromTiff(fileBytes, ct);
+				}
+
+				ImageFileFormatChosen = this.imageFileFormatOrigin;
+				return true;
+			}
+			catch (Exception ex)
+			{
+				logger?.LogException(ex, "cannot read file");
+				return false;
+			}
+			finally
+			{
+				if (this.IsExtra)
+				{
+					imageModelParent.count = pagesAll.Count;
+				}
+			}
+		}
+		#endregion
+
+		#region common methods
+		public void Dispose(bool disposing)
+		{
+			if (disposing && !disposedValue)
+			{
+				disposedValue = true;
+
+				foreach (var extraImageModel in imageModelsExtra)
+				{
+					extraImageModel?.Dispose(disposing);
+				}
+
+				lock (pagesLocker)
+				{
+					foreach (var pm in pagesAll?.Where(x => x.ImageModelParent == this))
+					{
+						if (!(pm is null) && !pm.IsDisposing)
+						{
+							pm.IsSelectedSingle = false;
+							pm?.Dispose(true);
+						}
+					}
+				}
+			}
+		}
+
+		void IDisposable.Dispose()
+		{
+			// Не изменяйте этот код. Разместите код очистки в методе "Dispose(bool disposing)".
+			Dispose(disposing: true);
+			//GC.SuppressFinalize(this);
+		}
+		#endregion
+	}
+
+	public enum SourceType
+	{
+		BytesSource,
+		FileSource,
+		ImagesSource,
+	}
+
+	[Flags]
+	public enum BuildCopySettings
+	{
+		Simple = 0,
+		RawCopy = 1,
+		OnlySelectedSingle = 2,
+		OnlySelectedMultiple = 4,
+		OnlyFragmentSelected = 8,
+		KeepSelectionMultiple = 16,
+		KeepPageFragmentSelection = 32,
+		BurnStamps = 64,
+		BurnTiffAnnotations = 128,
+		KeepUndo = 256,
+		KeepFileFormat = 512,
+		KeepColorizeType = 1024,
+		KeepTiffAnnotationSaveType = 2048,
+		KeepStampSaveType = 4096,
+		KeepCropSelection = 8192,
+		KeepAll =
+			KeepSelectionMultiple |
+			KeepPageFragmentSelection |
+			KeepUndo |
+			KeepFileFormat |
+			KeepColorizeType |
+			KeepTiffAnnotationSaveType |
+			KeepStampSaveType |
+			KeepCropSelection,
+	}
+
+	/// <summary>
+	/// угол поворота страницы в градусах
+	/// </summary>
+	/// <param name="pageNumber">номер страницы (с 0)</param>
+	/// <param name="imageAngle">угол поворота в градусах (кратно 90)</param>
+	public class RawRotation(int pageNumber, double imageAngle)
+	{
+		public int PageNumber => pageNumber;
+		public double ImageAngle => imageAngle;
+	}
+}

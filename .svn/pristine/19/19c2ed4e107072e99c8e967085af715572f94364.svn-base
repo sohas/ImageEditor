@@ -1,0 +1,222 @@
+﻿using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+
+namespace ImageEditorControl.UIs
+{
+	public static class ControlExtensions
+	{
+		public static T FindVisualChildByName<T>(this DependencyObject parent, string name) where T : DependencyObject
+		{
+			for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+			{
+				var child = VisualTreeHelper.GetChild(parent, i);
+
+				if (child is T typedChild && child.GetValue(FrameworkElement.NameProperty)?.ToString() == name)
+				{
+					return typedChild;
+				}
+
+				var result = FindVisualChildByName<T>(child, name);
+
+				if (result != null)
+				{
+					return result;
+				}
+			}
+
+			return null;
+		}
+
+
+		/// <summary>
+		/// выполняет действие в потоке контрола
+		/// </summary>
+		/// <param name="control">контрол</param>
+		/// <param name="action">действие</param>
+		//public static void SafeThreadInvoke(this Control control, Action action)
+		//{
+		//	if (control is not null && !control.Disposing && !control.IsDisposed)
+		//	{
+		//		if (control.InvokeRequired)
+		//		{
+		//			control.Invoke(action);
+		//		}
+		//		else
+		//		{
+		//			action();
+		//		}
+		//	}
+		//}
+
+		///// <summary>
+		///// выполнет действие с курсором ожидания, как на контроле, так и на родительской форме, возвращая курсор к текущему после завершения действия
+		///// </summary>
+		///// <param name="control">контрол</param>
+		///// <param name="action">действие</param>
+		//public static void ProvideActionWithWaitCursor(this Control control, Action action)
+		//{
+		//	control.SafeThreadInvoke(() =>
+		//	{
+		//		var parentForm = control.FindForm();
+		//		Cursor parentFormCurrentCursor = null;
+		//		Cursor controlCurrentCursor = control.Cursor;
+		//		control.Cursor = Cursors.WaitCursor;
+
+		//		if (parentForm is not null)
+		//		{
+		//			parentFormCurrentCursor = parentForm.Cursor;
+		//			parentForm.Cursor = Cursors.WaitCursor;
+		//		}
+
+		//		action();
+
+		//		control.Cursor = controlCurrentCursor;
+
+		//		if (parentForm is not null && parentFormCurrentCursor is not null)
+		//		{
+		//			parentForm.Cursor = parentFormCurrentCursor;
+		//		}
+		//	});
+		//}
+
+		///// <summary>
+		///// настраивает диалог печати
+		///// </summary>
+		///// <param name="printPreviewDialog">диалог печати</param>
+		//public static void SetupPrintPreviewDialog(this PrintPreviewDialog printPreviewDialog)
+		//{
+		//	if (printPreviewDialog is not null && printPreviewDialog.Controls.Count > 0)
+		//	{
+		//		var ctls = new Control[printPreviewDialog.Controls.Count];
+		//		printPreviewDialog.Controls.CopyTo(ctls, 0);
+		//		var ts = ctls.FirstOrDefault(x => x.GetType() == typeof(ToolStrip));
+
+		//		if (ts is not null && ts.Controls.Count > 0)
+		//		{
+		//			var tsctls = new Control[ts.Controls.Count];
+		//			ts.Controls.CopyTo(tsctls, 0);
+		//			var pn = tsctls.FirstOrDefault(x => x.GetType() == typeof(NumericUpDown));
+
+		//			if (pn is NumericUpDown && ts is ToolStrip ts12 && ts12.Items.Count >= 12)
+		//			{
+		//				pn.Visible = false;//убираем выбор страниц
+		//				ts12.Items[11].Visible = false;//убираем лейбл выбора страниц
+		//			}
+		//		}
+		//	}
+		//}
+
+		///// <summary>
+		///// позвращает реальное относительное значение положения бегунка скроллбара
+		///// </summary>
+		///// <param name="scrollBar"></param>
+		///// <returns></returns>
+		//public static double GetRealRelativeValue(this ScrollBar scrollBar)
+		//{
+		//	var res =
+		//		(scrollBar.Value - scrollBar.Minimum) /
+		//		(double)(scrollBar.Maximum - scrollBar.LargeChange - scrollBar.Minimum);
+		//	res = res < 0 ? 0 : res > 1 ? 1 : res;
+
+		//	return res;
+		//}
+
+		///// <summary>
+		///// приводит диапазон значений скроллбара к полному диапазону от 0 до макс. 
+		///// </summary>
+		///// <param name="scrollBar">скроллбар</param>
+		///// <param name="value">значение в диапазоне от 0 до макс, которое нужно присвоить положению скроллбара</param>
+		///// <exception cref="ArgumentOutOfRangeException"></exception>
+		//public static void SetRealRelativeValue(this ScrollBar scrollBar, double value)
+		//{
+		//	if (value > 1 || value < 0)
+		//	{
+		//		throw new ArgumentOutOfRangeException("the value must be >=0 and <= 1");
+		//	}
+
+		//	var res = scrollBar.Minimum + (int)(value * (scrollBar.Maximum - scrollBar.LargeChange - scrollBar.Minimum));
+		//	res = res > scrollBar.Maximum ? scrollBar.Maximum : res < scrollBar.Minimum ? scrollBar.Minimum : res;
+
+		//	scrollBar.Value = res;
+		//}
+
+		///// <summary>
+		///// настраивает кнопки в одном стиле
+		///// </summary>
+		///// <param name="button">кнопка</param>
+		///// <param name="image">иконка</param>
+		///// <param name="visible">состояние видимости</param>
+		//public static void SetButtonStyle(this Button button, Image image, bool visible = true)
+		//{
+		//	button.Image = image;
+		//	button.Visible = visible;
+		//	button.AutoSize = true;
+		//	button.Margin = new Padding(1);
+		//	button.FlatStyle = FlatStyle.Flat;
+		//	button.FlatAppearance.BorderColor = SystemColors.Control;
+		//	button.FlatAppearance.BorderSize = 0;
+		//	button.Size = TextRenderer.MeasureText(button.Text, button.Font);
+		//}
+
+		/// <summary>
+		/// переносит панель из её текущего родителя в новый контрол
+		/// </summary>
+		/// <param name="panel">панель, которая переносится</param>
+		/// <param name="element">контрол, в который переносится панель</param>
+		/// <param name="haveBeenUsed">условия разрешения переноса</param>
+		/// <returns>при успешном переносе -- перенесённая панель, иначе null</returns>
+		public static WrapPanel SetPanelOut(this WrapPanel panel, FrameworkElement element, ref bool haveBeenUsed)
+		{
+			if (!haveBeenUsed && panel is not null && element is not null)
+			{
+				var parent = panel.Parent;
+
+				if (parent is not null)
+				{
+					if (parent is Panel parentPanel)
+					{
+						parentPanel.Children.Remove(panel);
+					}
+					else if (parent is ContentControl parentContentControl)
+					{
+						parentContentControl.Content = null;
+					}
+					else if (parent is Decorator parentDecorator)
+					{
+						parentDecorator.Child = null;
+					}
+					else
+					{
+						return null;
+					}
+				}
+
+				panel.Visibility = Visibility.Visible;
+
+				if (element is Panel outerPanel)
+				{
+					outerPanel.Children.Add(panel);
+				}
+				else if (element is ContentControl outerControl)
+				{
+					outerControl.Content = panel;
+				}
+				else if (element is Decorator outerDecorator)
+				{
+					outerDecorator.Child = panel;
+				}
+				else
+				{
+					return null;
+				}
+
+				haveBeenUsed = true;
+
+				return panel;
+			}
+
+			return null;
+		}
+	}
+}

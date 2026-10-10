@@ -1,0 +1,21 @@
+namespace OperationDispatcher
+{
+	public class DispatchedOperation<TOperationID>(
+		TOperationID operationId, 
+		Func<CancellationToken, IProgress<(int, TOperationID)>?, TOperationID, Task> action, 
+		IProgress<(int, TOperationID)>? progressReporter = null) 
+		
+		where TOperationID : IID
+	{
+		public TOperationID OperationID => operationId;
+		public Func<CancellationToken, IProgress<(int, TOperationID)>?, TOperationID, Task> Action => action;
+		public IProgress<(int, TOperationID)>? ProgressReporter => progressReporter;
+
+		private readonly TaskCompletionSource tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public Task ExecutionTask => tcs.Task;
+
+		public void SetComplete() => tcs.TrySetResult();
+		public void SetException(Exception ex) => tcs.TrySetException(ex);
+		public void SetCanceled() => tcs.TrySetCanceled();
+	}
+}

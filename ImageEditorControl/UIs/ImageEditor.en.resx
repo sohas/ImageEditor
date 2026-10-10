@@ -1,0 +1,365 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<!-- 
+		Microsoft ResX Schema
+
+		Version 1.3
+
+		The primary goals of this format is to allow a simple XML format 
+		that is mostly human readable. The generation and parsing of the 
+		various data types are done through the TypeConverter classes 
+		associated with the data types.
+
+		Example:
+
+		... ado.net/XML headers & schema ...
+		<resheader name="resmimetype">text/microsoft-resx</resheader>
+		<resheader name="version">1.3</resheader>
+		<resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+		<resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+		<data name="Name1">this is my long string</data>
+		<data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+		<data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+			[base64 mime encoded serialized .NET Framework object]
+		</data>
+		<data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+			[base64 mime encoded string representing a byte array form of the .NET Framework object]
+		</data>
+
+		There are any number of "resheader" rows that contain simple 
+		name/value pairs.
+
+		Each data row contains a name, and value. The row also contains a 
+		type or mimetype. Type corresponds to a .NET class that support 
+		text/value conversion through the TypeConverter architecture. 
+		Classes that don't support this are serialized and stored with the 
+		mimetype set.
+
+		The mimetype is used for serialized objects, and tells the 
+		ResXResourceReader how to depersist the object. This is currently not 
+		extensible. For a given mimetype the value must be set accordingly:
+
+		Note - application/x-microsoft.net.object.binary.base64 is the format 
+		that the ResXResourceWriter will generate, however the reader can 
+		read any of the formats listed below.
+
+		mimetype: application/x-microsoft.net.object.binary.base64
+		value   : The object must be serialized with 
+			: System.Serialization.Formatters.Binary.BinaryFormatter
+			: and then encoded with base64 encoding.
+
+		mimetype: application/x-microsoft.net.object.soap.base64
+		value   : The object must be serialized with 
+			: System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+			: and then encoded with base64 encoding.
+
+		mimetype: application/x-microsoft.net.object.bytearray.base64
+		value   : The object must be serialized into a byte array 
+			: using a System.ComponentModel.TypeConverter
+			: and then encoded with base64 encoding.
+	-->
+	
+	<xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+		<xsd:element name="root" msdata:IsDataSet="true">
+			<xsd:complexType>
+				<xsd:choice maxOccurs="unbounded">
+					<xsd:element name="data">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+								<xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" msdata:Ordinal="1" />
+							<xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+							<xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="resheader">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" use="required" />
+						</xsd:complexType>
+					</xsd:element>
+				</xsd:choice>
+			</xsd:complexType>
+		</xsd:element>
+	</xsd:schema>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>1.3</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.3500.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.3500.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+        <data name="formName" xml:space="preserve">
+                <value>Document image editor</value>
+        </data>
+        <data name="deletePageName" xml:space="preserve">
+                <value>Delete page</value>
+        </data>
+        <data name="colorizeName" xml:space="preserve">
+                <value>Colorize</value>
+        </data>
+        <data name="bwName" xml:space="preserve">
+                <value>B/W</value>
+        </data>
+        <data name="grayName" xml:space="preserve">
+                <value>Gray</value>
+        </data>
+        <data name="rotateRName" xml:space="preserve">
+                <value>Rotate right</value>
+        </data>
+        <data name="rotateLName" xml:space="preserve">
+                <value>Rotate left</value>
+        </data>
+        <data name="flipXName" xml:space="preserve">
+                <value>Flip X the original</value>
+        </data>
+        <data name="flipYName" xml:space="preserve">
+                <value>Flip Y the original</value>
+        </data>
+        <data name="cropName" xml:space="preserve">
+                <value>Crop</value>
+        </data>
+        <data name="uncropName" xml:space="preserve">
+                <value>Uncrop</value>
+        </data>
+        <data name="fitToSelectionName" xml:space="preserve">
+                <value>Fit to selection</value>
+        </data>
+        <data name="hasNotesName" xml:space="preserve">
+                <value>Has notes</value>
+        </data>
+        <data name="setStampOnLocationName" xml:space="preserve">
+                <value>Set simple stamp</value>
+        </data>
+        <data name="setStampFullImageName" xml:space="preserve">
+                <value>Set all image stamp</value>
+        </data>
+        <data name="setStampFitToImageName" xml:space="preserve">
+                <value>Set big stamp</value>
+        </data>
+        <data name="removeStampName" xml:space="preserve">
+                <value>Remove stamp</value>
+        </data>
+        <data name="removeAnnotationName" xml:space="preserve">
+                <value>Remove note</value>
+        </data>
+        <data name="editAnnotationName" xml:space="preserve">
+                <value>Edit note</value>
+        </data>
+        <data name="setMarkerAnnotationName" xml:space="preserve">
+                <value>Set marker note</value>
+        </data>
+        <data name="setFrameAnnotationName" xml:space="preserve">
+                <value>Set frame note</value>
+        </data>
+        <data name="setSimpleTextAnnotationName" xml:space="preserve">
+                <value>Set simple text note</value>
+        </data>
+        <data name="setTextWithBackgroundAnnotationName" xml:space="preserve">
+                <value>Set text with background note</value>
+        </data>
+        <data name="okName" xml:space="preserve">
+                <value>OK</value>
+        </data>
+        <data name="cancelName" xml:space="preserve">
+                <value>Cancel</value>
+        </data>
+        <data name="colorName" xml:space="preserve">
+                <value>Color</value>
+        </data>
+        <data name="chooseColorName" xml:space="preserve">
+                <value>Choose color</value>
+        </data>
+        <data name="chooseTextName" xml:space="preserve">
+                <value>Choose text</value>
+        </data>
+        <data name="textColorName" xml:space="preserve">
+                <value>Text color</value>
+        </data>
+        <data name="backColorName" xml:space="preserve">
+                <value>Back color</value>
+        </data>
+        <data name="fontName" xml:space="preserve">
+                <value>Font</value>
+        </data>
+        <data name="chooseFrameName" xml:space="preserve">
+                <value>Choose frame</value>
+        </data>
+        <data name="keepAnnotationsName" xml:space="preserve">
+                <value>Keep notes</value>
+        </data>
+        <data name="loseAnnotationsName" xml:space="preserve">
+                <value>Lose notes</value>
+        </data>
+        <data name="burnAnnotationsName" xml:space="preserve">
+                <value>Burn notes</value>
+        </data>
+        <data name="physicalSizeName" xml:space="preserve">
+                <value>Physical size</value>
+        </data>
+        <data name="fitToWindowName" xml:space="preserve">
+                <value>Fit to window</value>
+        </data>
+        <data name="fitToHeightName" xml:space="preserve">
+                <value>Fit to height</value>
+        </data>
+        <data name="fitToWidthName" xml:space="preserve">
+                <value>Fit to width</value>
+        </data>
+        <data name="loseStampsName" xml:space="preserve">
+                <value>Lose stamps</value>
+        </data>
+        <data name="burnStampsName" xml:space="preserve">
+                <value>Burn stamps</value>
+        </data>
+        <data name="shiftPageDownName" xml:space="preserve">
+                <value>Page down</value>
+        </data>
+        <data name="shiftPageUpName" xml:space="preserve">
+                <value>Page up</value>
+        </data>
+        <data name="addExtraFileBeforeThisPageName" xml:space="preserve">
+                <value>Add extra file before this page</value>
+        </data>
+        <data name="documentNameName" xml:space="preserve">
+                <value>Document name</value>
+        </data>
+        <data name="changeDocumentNameName" xml:space="preserve">
+                <value>Change document name</value>
+        </data>
+        <data name="returnToOriginDocumentNameName" xml:space="preserve">
+                <value>Reset to standard document name</value>
+        </data>
+        <data name="attentionName" xml:space="preserve">
+                <value>Attention</value>
+        </data>
+        <data name="cannotSaveName" xml:space="preserve">
+                <value>You cannot save the file under the current conditions</value>
+        </data>
+        <data name="savePlainImageName" xml:space="preserve">
+                <value>You are trying to save the file not as pdf- or tif-type. All changes will be lost. Continue?</value>
+        </data>
+        <data name="fileExistsName" xml:space="preserve">
+                <value>The file already exists. Overwrite?</value>
+        </data>
+        <data name="applyToName" xml:space="preserve">
+                <value>Apply to</value>
+        </data>
+        <data name="applyChangesToName" xml:space="preserve">
+                <value>Apply changes</value>
+        </data>
+        <data name="pagesName" xml:space="preserve">
+                <value>to all pages</value>
+        </data>
+        <data name="documentsName" xml:space="preserve">
+                <value>to all documents</value>
+        </data>
+        <data name="documentTitleName" xml:space="preserve">
+                <value>Document:</value>
+        </data>
+        <data name="pageTitleName" xml:space="preserve">
+                <value>Page:</value>
+        </data>
+        <data name="annotationAddedName" xml:space="preserve">
+                <value>Note added</value>
+        </data>
+        <data name="annotationEditedName" xml:space="preserve">
+                <value>Note edited</value>
+        </data>
+        <data name="annotationRemovedName" xml:space="preserve">
+                <value>Note deleted</value>
+        </data>
+        <data name="extraModelAddedName" xml:space="preserve">
+                <value>File added</value>
+        </data>
+        <data name="documentNameChangedName" xml:space="preserve">
+                <value>Document name changed</value>
+        </data>
+        <data name="pageDeletedName" xml:space="preserve">
+                <value>Page deleted</value>
+        </data>
+        <data name="pagesDeletedMultipleName" xml:space="preserve">
+                <value>Several pages deleted</value>
+        </data>
+        <data name="pageRestoredName" xml:space="preserve">
+                <value>Page restored</value>
+        </data>
+        <data name="pagesRestoredMultipleName" xml:space="preserve">
+                <value>Several pages restored</value>
+        </data>
+        <data name="pageShiftedName" xml:space="preserve">
+                <value>Page shifted</value>
+        </data>
+        <data name="stampAddedName" xml:space="preserve">
+                <value>Stamp added</value>
+        </data>
+        <data name="stampEditedName" xml:space="preserve">
+                <value>Stamp edited</value>
+        </data>
+        <data name="stampRemovedName" xml:space="preserve">
+                <value>Stamp deleted</value>
+        </data>
+        <data name="undoName" xml:space="preserve">
+                <value>Undo:</value>
+        </data>
+        <data name="redoName" xml:space="preserve">
+                <value>Redo:</value>
+        </data>
+        <data name="zoomInName" xml:space="preserve">
+                <value>Zoom in</value>
+        </data>
+        <data name="zoomOutName" xml:space="preserve">
+                <value>Zoom out</value>
+        </data>
+        <data name="previousPageName" xml:space="preserve">
+                <value>Previous page</value>
+        </data>
+        <data name="nextPageName" xml:space="preserve">
+                <value>Next page</value>
+        </data>
+        <data name="cannotAddNoImageName" xml:space="preserve">
+                <value>Cannot add no-image</value>
+        </data>
+        <data name="selectFragmentName" xml:space="preserve">
+                <value>Select a fragment</value>
+        </data>
+        <data name="cannotWriteToDirectoryName" xml:space="preserve">
+                <value>You cannot write files to this directory</value>
+        </data>
+        <data name="showThumbnailsName" xml:space="preserve">
+                <value>Show pages panel</value>
+        </data>
+        <data name="addToSelectionMultipleName" xml:space="preserve">
+                <value>Add page to selection</value>
+        </data>
+        <data name="removeFromSelectionMultipleName" xml:space="preserve">
+                <value>Remove page from selection</value>
+        </data>
+        <data name="copyPageTextName" xml:space="preserve">
+                <value>Copy the page text</value>
+        </data>
+        <data name="noTextName" xml:space="preserve">
+                <value>The page has no text</value>
+        </data>
+        <data name="textIsExtractingName" xml:space="preserve">
+                <value>The text is being extracted…</value>
+        </data>
+        <data name="buildingImageModelName" xml:space="preserve">
+                <value>Building an image model</value>
+        </data>
+        <data name="readingFileName" xml:space="preserve">
+                <value>Reading the file</value>
+        </data>
+        <data name="savingImageModelName" xml:space="preserve">
+                <value>Saving to the file</value>
+        </data>
+</root>

@@ -1,0 +1,315 @@
+﻿using ImageEditorControl.Models;
+using ImageEditorControl.Tools;
+using ImageEditorControl.UIs;
+using Microsoft.Win32;
+using System.ComponentModel;
+using System.IO;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+
+namespace ImageEditorApp
+{
+	public class MainWindow : Window
+	{
+		private static readonly ComponentResourceManager resources = new ComponentResourceManager(typeof(MainWindow));
+		private readonly static string openName = resources.GetString("openName");
+		private readonly static string reloadName = resources.GetString("reloadName");
+		private readonly static string addName = resources.GetString("addName");
+		private readonly static string saveName = resources.GetString("saveName");
+		private readonly static string printName = resources.GetString("printName");
+		private readonly static string scanName = resources.GetString("scanName");
+		private readonly static string noScannersName = resources.GetString("noScannersName");
+		private readonly static string noScansName = resources.GetString("noScansName");
+		private readonly static string buildCopyName = resources.GetString("buildCopyName");
+
+		private readonly ImageEditor editor;
+		private readonly ControlSettings editorSettings;
+		private readonly ImageEditorAppLogger logger = new ImageEditorAppLogger();
+
+		private readonly OpenFileDialog openFileDialog = new OpenFileDialog();
+		private DirectoryInfo directoryInfoCurrent = null;
+		private readonly List<FileInfo> currentDirectoryFilesLast = new List<FileInfo>();
+		private FileInfo fileInfoCurrent = null;
+
+		private readonly SolidColorBrush appBrush = new SolidColorBrush(SystemColors.ControlColor);
+		private readonly Thickness standardThickness = new Thickness(4, 2, 4, 2);
+
+		private readonly Button buttonOpen = new Button();
+		private readonly Button buttonAdd = new Button();
+		private readonly Button buttonBuildCopy = new Button();
+		private readonly Button buttonSave = new Button();
+		private readonly Button buttonScan = new Button();
+		private readonly Button buttonReload = new Button();
+		private readonly Button buttonPrint = new Button();
+
+		GridSplitter splitter = new GridSplitter();
+
+		private readonly Grid tableLayoutPanelMain = new Grid();
+		private readonly WrapPanel flowLayoutPanelTools = new WrapPanel();
+		private readonly WrapPanel panelFiles = new WrapPanel();
+		private readonly Grid splitContainerMain = new Grid();
+		private readonly ListView listViewFiles = new ListView();
+
+		public MainWindow()
+		{
+			editorSettings =
+				ControlSettings.All
+				^ ControlSettings.UseSaveTools
+				^ ControlSettings.UseViewTools
+				^ ControlSettings.UseInfoTools;
+			editor = new ImageEditor(editorSettings, ImageCacheSettings.InternalCache, logger);
+
+			// Создаем StreamWriter, который пишет в трассировку Visual Studio
+			var writer = new StreamWriter(new DebugTextWriterStream());
+			writer.AutoFlush = true;
+			Console.SetOut(writer);
+
+			InitializeComponent();
+		}
+
+		private void InitializeComponent()
+		{
+			SetupButton(buttonOpen, openName);
+			buttonOpen.Click += StartOpenFile;
+
+			SetupButton(buttonAdd, addName);
+			buttonAdd.Click += AddFile;
+
+			SetupButton(buttonBuildCopy, buildCopyName);
+			buttonBuildCopy.Click += CopyFile;
+
+			SetupButton(buttonSave, saveName);
+			buttonSave.Click += SaveFile;
+
+			SetupButton(buttonReload, reloadName);
+			buttonReload.Click += ReloadFile;
+
+			listViewFiles.Background = Brushes.White;
+			listViewFiles.BorderThickness = new Thickness(1);
+			listViewFiles.BorderBrush = Brushes.Gray;
+			listViewFiles.DisplayMemberPath = "Name";
+			listViewFiles.SelectionChanged += OpenSelectedFile;
+
+			splitter.Width = 5;
+			splitter.HorizontalAlignment = HorizontalAlignment.Center;
+			splitter.VerticalAlignment = VerticalAlignment.Stretch;
+			splitter.Background = appBrush;
+
+			editor.Background = Brushes.White;
+			editor.BorderThickness = new Thickness(1);
+			editor.BorderBrush = Brushes.Gray;
+			editor.Background = Brushes.White;
+			//editor.AddExtraFileBeforePage += AddExtraFileBeforePage;
+
+
+			SetGridElement(
+				splitContainerMain, listViewFiles, 
+				new GridLength(150, GridUnitType.Pixel), true, 0);
+			SetGridElement(
+				splitContainerMain, splitter, 
+				new GridLength(5, GridUnitType.Pixel), true, 1);
+			SetGridElement(
+				splitContainerMain, editor, 
+				new GridLength(75, GridUnitType.Star), true, 2);
+
+			splitContainerMain.Margin = standardThickness;
+
+			var i = 0;
+
+			SetGridElement(tableLayoutPanelMain, flowLayoutPanelTools, GridLength.Auto, false, i++);
+
+			if (!editorSettings.HasFlag(ControlSettings.UseSaveTools))
+			{
+				SetGridElement(
+					tableLayoutPanelMain, 
+					editor.SetWrapPanelSaveToolsOut(tableLayoutPanelMain), 
+					GridLength.Auto, false, i++);
+			}
+
+			if (!editorSettings.HasFlag(ControlSettings.UseViewTools))
+			{
+				SetGridElement(
+					tableLayoutPanelMain, 
+					editor.SetWrapPanelViewToolsOut(tableLayoutPanelMain),
+					GridLength.Auto, false, i++);
+			}
+
+			SetGridElement(
+				tableLayoutPanelMain, splitContainerMain,
+				new GridLength(100, GridUnitType.Star), false, i++);
+
+			if (!editorSettings.HasFlag(ControlSettings.UseInfoTools))
+			{
+				SetGridElement(
+					tableLayoutPanelMain, 
+					editor.SetWrapPanelInfoToolsOut(tableLayoutPanelMain),
+					GridLength.Auto, false, i++);
+			}
+
+			flowLayoutPanelTools.Margin = standardThickness;
+
+			this.Content = tableLayoutPanelMain;
+			this.Background = appBrush;
+			this.Width = 800;
+			this.Height = 600;
+		}
+
+		private void SetupButton(Button button, string text)
+		{
+			button.Background = Brushes.Transparent;// new SolidColorBrush( SystemColors.ControlColor);
+			button.HorizontalAlignment = HorizontalAlignment.Center;
+			//button.Height = 20;
+			button.BorderThickness = new Thickness(0);
+			button.Padding = standardThickness;
+			button.Margin = standardThickness;
+			button.Content = text;
+			flowLayoutPanelTools.Children.Add(button);
+		}
+
+		private static void SetGridElement(Grid grid, FrameworkElement element, GridLength lenght, bool isColumn, int position)
+		{
+			if (isColumn)
+			{
+				ColumnDefinition column = new ColumnDefinition();
+				column.Width = lenght;
+				grid.ColumnDefinitions.Add(column);
+				Grid.SetColumn(element, position);
+			}
+			else
+			{
+				RowDefinition row = new RowDefinition();
+				row.Height = lenght;
+				grid.RowDefinitions.Add(row);
+				Grid.SetRow(element, position);
+			}
+
+			if (!grid.Children.Contains(element))
+			{
+				grid.Children.Add(element);
+			}
+		}
+
+		private void StartOpenFile(object _, EventArgs __)
+		{
+			if (openFileDialog.ShowDialog() == true)
+			{
+				var filename = openFileDialog.FileName;
+				UpdateLabels(filename);
+				SelectNewFile(filename);
+			}
+		}
+
+		private void AddFile(object _, EventArgs __)
+		{
+			if (openFileDialog.ShowDialog() == true)
+			{
+				var filename = openFileDialog.FileName;
+				//editor.AddExtraFileToCurrentImageModelAsync(filename);
+			}
+		}
+
+		private void AddExtraFileBeforePage(object _, AddExtraFileBeforePageEventArgs e)
+		{
+			if (openFileDialog.ShowDialog() == true)
+			{
+				var filename = openFileDialog.FileName;
+				//editor.AddExtraFileToCurrentImageModelAsync(filename, e.PageModel.PageNumberCurrent);
+			}
+		}
+
+		private void CopyFile(object _, EventArgs __)
+		{
+			if (openFileDialog.ShowDialog() == true)
+			{
+				var filename = openFileDialog.FileName;
+				UpdateLabels(filename);
+				SelectNewFile(filename);
+			}
+		}
+
+		private void SaveFile(object _, EventArgs __)
+		{
+			if (openFileDialog.ShowDialog() == true)
+			{
+				var filename = openFileDialog.FileName;
+				//editor.SaveImageModelToFileAsync(filename, null, null);
+			}
+		}
+
+		private void ReloadFile(object _, EventArgs __)
+		{
+			//editor.ReloadImageModelAsync();
+		}
+
+		private void UpdateLabels(string fileName)
+		{
+			if (!File.Exists(fileName))
+			{
+				return;
+			}
+
+			if (!string.IsNullOrEmpty(fileName))
+			{
+				fileInfoCurrent = new FileInfo(fileName);
+
+				if (fileInfoCurrent is not null && fileInfoCurrent.Exists)
+				{
+					directoryInfoCurrent = fileInfoCurrent.Directory;
+				}
+				else
+				{
+					fileInfoCurrent = null;
+				}
+			}
+
+			directoryInfoCurrent = directoryInfoCurrent is null ? null : new DirectoryInfo(directoryInfoCurrent.FullName);//заново строим, так как содержание директории могло измениться
+			var newFiles = directoryInfoCurrent is null || !directoryInfoCurrent.Exists ? new FileInfo[0] : directoryInfoCurrent.GetFiles();//файлы новой директории
+
+			//для построения лейблов файлов
+			var newFilesForLabels = newFiles.Select(x => x.FullName).Except(currentDirectoryFilesLast.Select(y => y.FullName));//не было лейблов
+			var missedFilesForLabels = currentDirectoryFilesLast.Select(x => x.FullName).Except(newFiles.Select(y => y.FullName));//были лейблы, но файлов уже нет
+
+			if (newFilesForLabels.Any() || missedFilesForLabels.Any())//если список файлов изменился
+			{
+				currentDirectoryFilesLast.Clear();
+				currentDirectoryFilesLast.AddRange(newFiles);
+			}
+
+			listViewFiles.ItemsSource = newFiles;
+		}
+
+		private void SelectNewFile(string fileName)
+		{
+			if (string.IsNullOrEmpty(fileName))
+			{
+				//this.documentImageEditorControl.LoadFileAsync(null);
+			}
+			else
+			{
+				fileName = Path.GetFullPath(fileName);
+				var items = listViewFiles.ItemsSource as IEnumerable<FileInfo>;
+				var itemToSelect = items?.FirstOrDefault(f => string.Equals(f.FullName, fileName, StringComparison.OrdinalIgnoreCase));
+
+				if (itemToSelect != null)
+				{
+					listViewFiles.SelectedItem = itemToSelect;
+					listViewFiles.ScrollIntoView(itemToSelect);
+				}
+			}
+		}
+
+		private void OpenSelectedFile(object _, SelectionChangedEventArgs e)
+		{
+			var item = listViewFiles.SelectedValue;
+
+			if (item is FileInfo fi && fi.Exists)
+			{
+				editor.LoadFile(fi.FullName);
+			}
+			else
+			{
+			}
+		}
+	}
+}

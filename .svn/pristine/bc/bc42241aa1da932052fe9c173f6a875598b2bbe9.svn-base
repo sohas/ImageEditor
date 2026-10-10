@@ -1,0 +1,137 @@
+﻿using System.Drawing;
+using System.Linq;
+using ImageEditorControl.Tools;
+
+namespace ImageEditorControl.Models
+{
+	/// <summary>
+	/// модель-представление штампа
+	/// </summary>
+	/// <param name="pm">родительская модель страницы</param>
+	/// <param name="bytesBitmap">битмап штампа</param>
+	/// <param name="type">тип штампа</param>
+	/// <param name="angle">угол (для простых штампов)</param>
+	/// <param name="stampRectangle">границы штампа на странице</param>
+	/// <param name="rotateFlipInitial">изначальная ориентация штампа при постановке штампа</param>
+	public class StampModel(PageModel pm, byte[] bytesBitmap, SetStampType type, float angle, Rectangle stampRectangle, RotateFlipType rotateFlipInitial)
+	{
+		private readonly PageModel pageModelParent = pm;
+		private readonly byte[] bytesBitmap = bytesBitmap;
+		private readonly RotateFlipType rotateFlipInitial = rotateFlipInitial;
+		private readonly SetStampType setStampType = type;
+		private float angle = type == SetStampType.OnLocation ? angle : 0;
+		private bool isSelected = false;
+		private readonly int index = pm.StampIndex++;
+
+		public int Index => index;
+		public byte[] BytesBitmap => bytesBitmap;
+		public float Angle => angle;
+		public RotateFlipType RotateFlipInitial => rotateFlipInitial;
+		public Rectangle RectangleStamp { get; set; } = stampRectangle;
+		public SetStampType SetStampType => setStampType;
+		public PageModel PageModelParent => pageModelParent;
+
+		public bool IsSelected
+		{
+			get => isSelected;
+			set
+			{
+				if (!value)
+				{
+					isSelected = false;
+				}
+				else
+				{
+					foreach (var stamp in pageModelParent.Stamps.Where(x => x != this))
+					{
+						stamp.isSelected = false;
+					}
+
+					isSelected = true;
+					pageModelParent.SetSelectedStamp(this);
+				}
+			}
+		}
+
+		/// <summary>
+		/// смещение штампа на странице
+		/// </summary>
+		/// <param name="dx"></param>
+		/// <param name="dy"></param>
+		public void ShiftBounds(int dx, int dy) => RectangleStamp = new Rectangle(
+			RectangleStamp.X + dx, RectangleStamp.Y + dy, RectangleStamp.Width, RectangleStamp.Height);
+
+		/// <summary>
+		/// проверка, принадлежит ли точка штампу (с учётом его поворота)
+		/// </summary>
+		/// <param name="pointOnPage"></param>
+		/// <returns></returns>
+		public bool IsPointOnRotatedStamp(Point pointOnPage)
+		{
+			var stampCenterPoint = RectangleStamp.Location.Plus(new Point(RectangleStamp.Width / 2, RectangleStamp.Height / 2));
+			var shiftedVector = pointOnPage.Minus(stampCenterPoint);
+			var rotatedVector = shiftedVector.GetRotatedPoint(-Angle);
+			var projection = rotatedVector.Plus(stampCenterPoint);
+
+			return RectangleStamp.Contains(projection);
+		}
+
+		public void SetAngle(float angle) => this.angle = angle;
+
+		/// <summary>
+		/// создаёт клон штампа для клона модели страницы
+		/// </summary>
+		/// <param name="pm">страница-клон</param>
+		/// <returns>клон штампа</returns>
+		public StampModel Clone(PageModel pm) =>
+			new StampModel(pm, bytesBitmap.GetDeepCopy(), setStampType, angle, RectangleStamp, rotateFlipInitial);
+	}
+
+	/// <summary>
+	/// "сырой" штамп
+	/// </summary>
+	/// <param name="stampBytes">байты изображения штампа</param>
+	/// <param name="pageNumber">номер страницы (с 0)</param>
+	/// <param name="xOnRotated">координата X на ПОВЁРНУТОМ изображении страницы</param>
+	/// <param name="yOnRotated">координата Y на ПОВЁРНУТОМ изображении страницы</param>
+	/// <param name="stampAngle">угол поворота штампа в градусах</param>
+	/// <param name="imageAngle">угол поворота страницы в градусах (кратно 90)</param>
+	/// <param name="makeTransparent">true если нужно сделать фон штампа прозрачным</param>
+	public class RawStamp(byte[] stampBytes, int pageNumber, int xOnRotated, int yOnRotated, int stampAngle, int imageAngle, bool makeTransparent)
+	{
+		/// <summary>
+		/// байты изображения штампа
+		/// </summary>
+		public byte[] Bytes => stampBytes;
+
+		/// <summary>
+		/// номер страницы (с 0)
+		/// </summary>
+		public int PageNumber => pageNumber;
+
+		/// <summary>
+		/// координата X на ПОВЁРНУТОМ изображении страницы
+		/// </summary>
+		public int XOnRotated => xOnRotated;
+
+		/// <summary>
+		/// координата Y на ПОВЁРНУТОМ изображении страницы
+		/// </summary>
+		public int YOnRotated => yOnRotated;
+
+		/// <summary>
+		/// угол поворота штампа в градусах
+		/// </summary>
+		public int StampAngle => stampAngle;
+
+		/// <summary>
+		/// угол поворота страницы в градусах (кратно 90)
+		/// </summary>
+		public int ImageAngle => imageAngle;
+
+		/// <summary>
+		/// true если нужно сделать фон штампа прозрачным
+		/// </summary>
+		public bool MakeTransparent => makeTransparent;
+	}
+}

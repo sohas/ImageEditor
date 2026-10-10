@@ -1,0 +1,2271 @@
+﻿using System.IO;
+using System.Windows.Media.Imaging;
+using System.Runtime.InteropServices;
+using BitMiracle.LibTiff.Classic;
+using TiffTag = BitMiracle.LibTiff.Classic.TiffTag;
+using Orientation = BitMiracle.LibTiff.Classic.Orientation;
+using BitMiracle.Tiff2Pdf;
+using ImageEditorControl.Models;
+using ImageEditorControl.Models.TiffAnnotations;
+using System.Windows;
+using Docnet.Core.Models;
+using Docnet.Core;
+using System.Windows.Media;
+using DocnetExtended;
+using PdfSharpCore.Pdf.IO;
+using PdfSharpCore.Pdf;
+using System.Windows.Media.Animation;
+using System.Windows.Controls;
+using ImageEditorControl.ImageReaders.Pdf;
+
+
+namespace ImageEditorControl.Tools
+{
+	public static class ReadWriteDrawExtensions
+	{
+		private static readonly Pen whitePen = new Pen(Brushes.White, 1);
+		private static readonly Pen selectionPen = new Pen(Brushes.DarkGray, 1) { DashStyle = DashStyles.Dash };
+		private static readonly Pen selectionExtra = new Pen(Brushes.OrangeRed, 1) { DashStyle = DashStyles.Dash };
+
+		// Обязательно делаем объект lock статическим, чтобы все экземпляры синхронизировались через него
+		private static readonly object pdfReadLocker = new object();
+
+		// Статические «шлагбаумы» разделяются между всеми вызовами во всем приложении
+		private static readonly ManualResetEventSlim canReadPdfSlim = new ManualResetEventSlim(true);
+		private static readonly ManualResetEventSlim canReadNotPdfSlim = new ManualResetEventSlim(true);
+
+		// Статические счетчики активных потоков
+		private static int pdfReadCounter = 0;
+		private static int notPdfReadCounter = 0;
+
+		#region geometry
+		public static Point Plus(this Point a, Point b) => new Point(a.X + b.X, a.Y + b.Y);
+
+		public static Point Minus(this Point a, Point b) => new Point(a.X - b.X, a.Y - b.Y);
+
+		public static Point Reflect(this Point a) => new Point(-a.X, -a.Y);
+
+		public static Point Mult(this Point a, double b) => new Point(a.X * b, a.Y * b);
+
+		public static Point GetRotatedPoint(this Point p, float angleDegree)
+		{
+			var k = 1.0;
+			var pX = p.X / k;
+			var pY = p.Y / k;
+
+			while (Math.Abs(pX) > 40000 || Math.Abs(pY) > 40000)//борьба с переполнением
+			{
+				k *= 2;
+				pX /= k;
+				pY /= k;
+			}
+
+			var r = k * Math.Sqrt(pX * pX + pY * pY);
+			var angleInRadian = 2 * Math.PI * angleDegree / 360;
+
+			var x = 0.0;
+			var y = 0.0;
+
+			if (p.Y != 0 || p.X != 0)
+			{
+				var angleInRadianNew = Math.Atan2(pY, pX) + angleInRadian;
+
+				x = r * Math.Cos(angleInRadianNew);
+				y = r * Math.Sin(angleInRadianNew);
+			}
+
+			return new Point((int)x, (int)y);
+		}
+
+		public static RotateFlipType Add(this RotateFlipType a, RotateFlipType b)
+		{
+			var i = (int)a;
+			var j = (int)b;
+			int res;
+
+			if (i < 4 && j < 4)
+			{
+				res = (i + j) % 4;
+			}
+			else if (i < 4 && j >= 4)
+			{
+				res = (i + j) % 4 + 4;
+			}
+			else if (i >= 4 && j < 4)
+			{
+				res = (i - j + 8) % 4 + 4;
+			}
+			else
+			{
+				res = (i - j + 8) % 4;
+			}
+
+			return (RotateFlipType)res;
+		}
+
+		public static RotateFlipType Substract(this RotateFlipType a, RotateFlipType b)
+		{
+			var i = (int)a;
+			var j = (int)b;
+			int res;
+
+			if (i < 4 && j < 4 || i >= 4 && j >= 4)
+			{
+				res = (i - j + 4) % 4;
+			}
+			else
+			{
+				res = (i + j) % 4 + 4;
+			}
+
+			return (RotateFlipType)res;
+		}
+
+		public static Rect NormalizeRectangle(this Rect rec)
+		{
+			var x = Math.Min(rec.Left, rec.Right);
+			var y = Math.Min(rec.Top, rec.Bottom);
+			var w = Math.Abs(rec.Width);
+			var h = Math.Abs(rec.Height);
+
+			return new Rect(x, y, w, h);
+		}
+		#endregion
+
+		#region read
+		//private readonly static ColorMatrix colorMatrix = new ColorMatrix(
+		//[
+		//	[.3f, .3f, .3f, 0, 0],
+		//	[.59f, .59f, .59f, 0, 0],
+		//	[.11f, .11f, .11f, 0, 0],
+		//	[0, 0, 0, 1, 0],
+		//	[0, 0, 0, 0, 1]
+		//]);
+
+		public static byte[]? CopyImmutableArray(byte[] source)
+		{
+			if (source == null)
+			{
+				return null;
+			}
+
+			return [.. source];
+		}
+
+		public static bool IsFileLocked(this string filePath)
+		{
+			try
+			{
+				// Пытаемся открыть файл для чтения/записи без блокировки других
+				using FileStream stream = new FileStream(
+				    filePath,
+				    FileMode.Open,
+				    FileAccess.ReadWrite,
+				    FileShare.None);
+			}
+			catch (IOException)
+			{
+				return true;
+			}
+
+			return false;
+		}
+
+		public static BitmapDecoder FindDecoderForTiffAndPlainImageAndSetFormat(this Stream stream, out ImageFileFormat imageFileFormat)
+		{
+			BitmapDecoder res;
+			imageFileFormat = ImageFileFormat.Unknown;
+
+			try
+			{
+				stream.Position = 0;
+				res = new JpegBitmapDecoder(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.OnDemand);
+				imageFileFormat = ImageFileFormat.Jpg;
+				return res;
+			}
+			catch { }
+			try
+			{
+				stream.Position = 0;
+				res = new GifBitmapDecoder(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.OnDemand);
+				imageFileFormat = ImageFileFormat.Gif;
+				return res;
+			}
+			catch { }
+			try
+			{
+				stream.Position = 0;
+				res = new PngBitmapDecoder(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.OnDemand);
+				imageFileFormat = ImageFileFormat.Png;
+				return res;
+			}
+			catch { }
+			try
+			{
+				stream.Position = 0;
+				res = new BmpBitmapDecoder(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.OnDemand);
+				imageFileFormat = ImageFileFormat.Bmp;
+				return res;
+			}
+			catch { }
+			try
+			{
+				stream.Position = 0;
+				res = new TiffBitmapDecoder(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.OnDemand);
+				imageFileFormat = ImageFileFormat.Tiff;
+				return res;
+			}
+			catch { }
+
+			return null;
+		}
+
+		public static BitmapDecoder? GetDecoderForTiffAndPlainImage(this Stream stream, ImageFileFormat imageFileFormat)
+		{
+			return imageFileFormat switch
+			{
+				ImageFileFormat.Tiff => new TiffBitmapDecoder(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.OnDemand),
+				ImageFileFormat.Jpg => new JpegBitmapDecoder(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.OnDemand),
+				ImageFileFormat.Gif => new GifBitmapDecoder(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.OnDemand),
+				ImageFileFormat.Png => new PngBitmapDecoder(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.OnDemand),
+				ImageFileFormat.Bmp => new BmpBitmapDecoder(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.OnDemand),
+				_ => null,
+			};
+		}
+
+		/// <summary>
+		/// возвращает сырую метку тифф или пдф-файла. 
+		/// для tiff это TiffTag.IMAGEDESCRIPTION первой страницы.
+		/// для pdf это PdfReader.Info.FirstOrDefault(x => x.Key == "Keywords").Value 
+		/// </summary>
+		/// <param name="fileBytes"></param>
+		/// <returns>метка</returns>
+		public static string[] GetRawMarks(byte[] fileBytes)
+		{
+			string[] res = [];
+
+			//try
+			//{
+			//	using var ms = new MemoryStream(fileBytes);
+			//	var decoder = ms.FindDecoderForTiffAndPlainImageAndSetFormat(out _);
+			//	ms.Position = 0;
+
+			//	if (decoder is TiffBitmapDecoder)
+			//	{
+			//		using Tiff image = Tiff.ClientOpen("InMemory", "r", ms, new TiffStream());
+			//		if (image.GetField(TiffTag.IMAGEDESCRIPTION) is FieldValue[] fvs && fvs.Any() && fvs[0] is FieldValue fv && fv.Value is byte[] bytes)
+			//			return [System.Text.Encoding.ASCII.GetString(bytes)];
+			//	}
+
+			//	ms.Position = 0;
+
+			//	using (PdfDocument document = PdfReader.Open(ms, PdfDocumentOpenMode.ReadOnly))
+			//	{
+			//		//// Вариант 1: Через стандартное типизированное свойство
+			//		//string keywordsDirect = document.Info.Keywords;
+			//		//Console.WriteLine($"Ключевые слова (через свойство): {keywordsDirect}");
+
+			//		// Вариант 2: Универсальный поиск по строковому ключу (для любых кастомных полей)
+			//		// Важно: Стандартные ключи в PDF начинаются со слэша в словаре, 
+			//		// но PdfSharpCore берет строку "/Keywords" или "Keywords" автоматически.
+			//		string key = "/Keywords";
+
+			//		if (document.Info.Elements.ContainsKey(key))
+			//		{
+			//			return [.. document.Info.Elements.Where(x => x.Key == key).Select(x => x.Value.ToString())];
+			//		}
+			//	}
+			//}
+			//catch (Exception) { }
+
+			return res;
+		}
+
+		public static bool IsBWColorViaWindowsMedia(this BitmapSource bs, out bool isIndexed)
+		{
+			isIndexed = false;
+
+			if (bs is null)
+			{
+				return false;
+			}
+
+			var format = bs.Format;
+
+			if (
+				format == PixelFormats.BlackWhite ||
+				format == PixelFormats.Gray2 ||
+				format == PixelFormats.Gray4 ||
+				format == PixelFormats.Gray8 ||
+				format == PixelFormats.Gray16 ||
+				format == PixelFormats.Gray32Float ||
+				false)
+			{
+				return true;
+			}
+			else if (
+				format == PixelFormats.Indexed1 ||
+				format == PixelFormats.Indexed2 ||
+				format == PixelFormats.Indexed4 ||
+				format == PixelFormats.Indexed8 ||
+				false)
+			{
+				isIndexed = true;
+
+				var palette = bs.Palette.Colors;
+
+				if (palette is null)
+				{
+					return false;
+				}
+
+				foreach (var color in palette)
+				{
+					if (color.R != color.G || color.G != color.B)
+					{
+						return false;
+					}
+				}
+
+				return true;
+			}
+
+			return false;
+		}
+
+		//public static bool IsBWColorViaSystemDrawing(this Image im, out bool isIndexed)
+		//{
+		//	isIndexed = false;
+
+		//	if (im is null)
+		//	{
+		//		return false;
+		//	}
+
+		//	var format = im.PixelFormat;
+
+		//	if (
+		//		format == PixelFormat.Format16bppGrayScale ||
+		//		false)
+		//	{
+		//		return true;
+		//	}
+		//	else if (
+		//		format == PixelFormat.Indexed ||
+		//		format == PixelFormat.Format1bppIndexed ||
+		//		format == PixelFormat.Format4bppIndexed ||
+		//		format == PixelFormat.Format8bppIndexed ||
+		//		false)
+		//	{
+		//		isIndexed = true;
+
+		//		var palette = im.Palette.Entries;
+
+		//		if (palette is null)
+		//		{
+		//			return false;
+		//		}
+
+		//		foreach (var color in palette)
+		//		{
+		//			if (color.R != color.G || color.G != color.B)
+		//			{
+		//				return false;
+		//			}
+		//		}
+
+		//		return true;
+		//	}
+
+		//	return false;
+		//}
+
+		//public static bool IsBWColorDeepAnalize(this Bitmap bm)
+		//{
+		//	var w = bm.Width;
+		//	var h = bm.Height;
+
+		//	for (var x = 0; x < w; x++)
+		//	{
+		//		for (var y = 0; y < h; y++)
+		//		{
+		//			var color = bm.GetPixel(x, y);
+		//			if (color.R != color.G || color.G != color.B)
+		//			{
+		//				return false;
+		//			}
+		//		}
+		//	}
+
+		//	return true;
+		//}
+
+		public static byte[] GetDeepCopy(this byte[] source)
+		{
+			if (source is null)
+			{
+				return null;
+			}
+
+			var copy = new byte[source.Length];
+			Buffer.BlockCopy(source, 0, copy, 0, copy.Length);
+			return copy;
+		}
+
+		public static T[] GetDeepCopy<T>(this T[] source)
+		{
+			if (source is null)
+			{
+				return null;
+			}
+
+			T[] copy = new T[source.Length];
+			Array.Copy(source, copy, source.Length);
+			return copy;
+		}
+
+		public static bool IsSimilar<T>(this T[] array1, T[] array2)
+		{
+			if (array1 is not null && array2 is not null)
+			{
+				return array1.SequenceEqual(array2);
+			}
+			else
+			{
+				return array1 is null && array2 is null;
+			}
+		}
+
+		//public static Bitmap GetDeepCopy(this Bitmap source)
+		//{
+		//	if (source is null)
+		//	{
+		//		return null;
+		//	}
+
+		//	using Stream stream = new MemoryStream();
+		//	IFormatter formatter = new BinaryFormatter();
+		//	formatter.Serialize(stream, source);
+		//	stream.Seek(0, SeekOrigin.Begin);
+
+		//	return (Bitmap)formatter.Deserialize(stream);
+		//}
+
+		//public static Bitmap GetColorizeBitmap(this Image source)
+		//{
+		//	var res = new Bitmap(source, new Size(source.Width, source.Height));
+		//	res.SetResolution(source.HorizontalResolution, source.VerticalResolution);
+
+		//	return res;
+		//}
+
+		//public static Bitmap GetBWBitmap(this Image source)
+		//{
+		//	var myImageCodecInfo = ImageCodecInfo.GetImageEncoders()
+		//		.Where(x => x.MimeType == "image/tiff")
+		//		.FirstOrDefault();
+
+		//	var myEncoder = Encoder.ColorDepth;
+		//	var myEncoderParameters = new EncoderParameters(1);
+		//	var myEncoderParameter = new EncoderParameter(myEncoder, 1L);
+		//	myEncoderParameters.Param[0] = myEncoderParameter;
+
+		//	Bitmap res;
+
+		//	using (MemoryStream ms = new MemoryStream())
+		//	{
+		//		source.Save(ms, myImageCodecInfo, myEncoderParameters);
+		//		res = new Bitmap(ms);
+		//	}
+
+		//	res.SetResolution(source.HorizontalResolution, source.VerticalResolution);
+
+		//	return res;
+		//}
+
+		//public static Bitmap GetGrayscaleBitmap(this Image source)
+		//{
+		//	var res = new Bitmap(source.Width, source.Height);
+
+		//	using (var g = Graphics.FromImage(res))
+		//	using (ImageAttributes attributes = new ImageAttributes())
+		//	{
+		//		attributes.SetColorMatrix(colorMatrix);
+		//		g.DrawImage(source, new Rectangle(0, 0, source.Width, source.Height), 0, 0, source.Width, source.Height, GraphicsUnit.Pixel, attributes);
+		//	}
+
+		//	res.SetResolution(source.HorizontalResolution, source.VerticalResolution);
+
+		//	return res;
+		//}
+
+		/// <summary>
+		/// Извлекает текст страницы Pdf-файла, если он там присутствует. 
+		/// В некоторых случаях кодировка может быть нарушена.
+		/// </summary>
+		/// <param name="pm">модель страницы</param>
+		/// <returns>извлечённый текст</returns>
+		public static string ExtractPagePdfText(this PageModel pm)
+		{
+			string res = null;
+
+			if (
+				pm.ImageModelParent is ImageModel im &&
+				pm.ImageFileFormatOrigin == ImageFileFormat.Pdf &&
+				im.FileBytes is byte[] bts && bts.Any())
+			{
+				using var docReader = DocLib.Instance.GetDocReader(bts, new PageDimensions());
+				using var pageReader = new OrderedPageTextReader(docReader, pm.PageNumberInitial);
+				res = pageReader.GetTextInReadableOrder();
+			}
+
+			return res;
+		}
+
+		/// <summary>
+		/// Извлекает тексты страниц Pdf-файла в виде списка в порядке следования страниц 
+		/// оригинального файла (не в порядке страниц модели).
+		/// При отсутствии текста на странице для этой страницы в список добавляется null.
+		/// В некоторых случаях кодировка может быть нарушена.
+		/// При невозможности извлечь, список возвращается как null
+		/// </summary>
+		/// <param name="im"></param>
+		/// <returns>список текстов страниц</returns>
+		public static List<string> ExtractAllPagesPdfText(this ImageModel im)
+		{
+			List<string> res = null;
+
+			if (
+				im.ImageFileFormatOrigin == ImageFileFormat.Pdf &&
+				im.FileBytes is byte[] bts && bts.Any())
+			{
+				res = [];
+
+				using var docReader = DocLib.Instance.GetDocReader(im.FileBytes, new PageDimensions());
+
+				for (var i = 0; i < im.PagesAllCount; i++)
+				{
+					using var pageReader = new OrderedPageTextReader(docReader, i);
+					res.Add(pageReader.GetTextInReadableOrder());
+				}
+			}
+
+			return res;
+		}
+
+		/// <summary>
+		/// подбирает размер изображения под размер рамки, максимально заполняя рамку
+		/// </summary>
+		/// <param name="outerSize"></param>
+		/// <param name="heightDevidedByWidth"></param>
+		/// <returns>размер изображения</returns>
+		public static Size GetFitSize(this Size outerSize, double heightDevidedByWidth)
+		{
+			var w = outerSize.Width;
+			var h = (w * heightDevidedByWidth);
+
+			if (h > outerSize.Height)
+			{
+				h = outerSize.Height;
+				w = (int)(h / heightDevidedByWidth);
+			}
+
+			return new Size(w, h);
+		}
+
+
+		/// <summary>
+		/// вынимает базовый битмап страницы и применяет action к нему
+		/// </summary>
+		/// <param name="pm">PageModel страницы</param>
+		/// <param name="action">то, что мы делаем с базовым битмапом</param>
+		/// <param name="forThumbnail">true для построения небольших изображений</param>
+		public static void ReadPageForAction(this PageModel pm, Action<BitmapSource?> action, bool forThumbnail = false)
+		{
+			if (action is null)
+			{
+				return;
+			}
+
+			try
+			{
+				if (pm.ImageModelParent.SourceType == SourceType.ImagesSource)
+				{
+					var pageImage = pm.ImageModelParent.ScanPagesInitial[pm.PageNumberInitial];
+					action(pageImage);
+				}
+				else if (pm.ImageFileFormatOrigin == ImageFileFormat.Pdf)
+				{
+					action(pm.ImageModelParent?.ImageReader?.GetBitmapSource(pm, forThumbnail));
+				}
+				else if (pm.ImageFileFormatOrigin == ImageFileFormat.Tiff || pm.IsPlainImage)
+				{
+					using Stream ms0 = new MemoryStream(pm.ImageModelParent.FileBytes);
+					var decoder = ms0.GetDecoderForTiffAndPlainImage(pm.ImageFileFormatOrigin);
+					var frame = decoder.Frames[pm.PageNumberInitial];
+
+					using MemoryStream ms = new MemoryStream();
+					BmpBitmapEncoder encoder = new BmpBitmapEncoder();
+					encoder.Frames.Add(frame);
+					encoder.Save(ms);
+					ms.Position = 0;
+
+					var ths = ImageModel.ThumbnailSize.GetFitSize(frame.Height / frame.Width);
+
+					BitmapImage finalBitmap = new BitmapImage();
+					finalBitmap.BeginInit();
+					finalBitmap.CacheOption = BitmapCacheOption.OnLoad; // Выкачиваем в ОЗУ мгновенно
+					finalBitmap.StreamSource = ms;
+
+					if (forThumbnail)
+					{
+						finalBitmap.DecodePixelWidth = (int)ths.Width;
+						finalBitmap.DecodePixelHeight = (int)ths.Height;
+					}
+
+					finalBitmap.EndInit();
+					finalBitmap.Freeze();
+
+					action(finalBitmap);
+				}
+			}
+			catch (Exception ex)
+			{
+				throw;
+			}
+		}
+		#endregion
+
+		#region print
+		///// <summary>
+		///// печатает PageModel в PaintEventArgs принтера
+		///// </summary>
+		///// <param name="pea">аргументы события печати</param>
+		///// <param name="pm">модель страницы</param>
+		///// <param name="fitScale">если true, то подгонка страницы</param>
+		///// <param name="printArea">область печати</param>
+		///// <param name="tav">способ фильтрации заметок</param>
+		///// <param name="drawTitles">если true, то печатаются надписи</param>
+		///// <param name="useBorder">если true, то рисуется рамка вокруг источника</param>
+		///// <param name="needToRotate">сообщает о необходимости повернуть итоговое изображение печати (нужно для отображения в редакторе)</param>
+		//public static void PrintPageModel(
+		//		this PaintEventArgs pea, PageSettingsQuick ps, PageModel pm, bool fitScale,
+		//		PrintOrientation printOrientation, PrintArea printArea, TiffAnnotationView tav,
+		//		bool drawTitles, bool useBorder, out bool needToRotate) =>
+		//		pm.DrawPageImageForExtraPaint(pea, ps, fitScale, printOrientation, printArea, tav, drawTitles, useBorder, out needToRotate);
+		#endregion
+
+		#region draw
+		//private static void DrawPageImageForExtraPaint(
+		//	this PageModel pm, PaintEventArgs pea, PageSettingsQuick ps, bool fitScale,
+		//	PrintOrientation printOrientation, PrintArea printArea, TiffAnnotationView tav,
+		//	bool drawTitles, bool useBorder, out bool needToRotate)
+		//{
+		//	needToRotate = false;
+
+		//	if (!pm.IsDisposing)
+		//	{
+		//		using var bitmapToFill = pm.GetBitmapToFill();
+		//		using var bitmapForDraw = new Bitmap(pm.BitmapForView);
+		//		bitmapToFill.SetResolution((float)pm.DpiX, (float)pm.DpiY);
+		//		bitmapForDraw.SetResolution((float)pm.DpiX, (float)pm.DpiY);
+		//		var graphicsToFill = Graphics.FromImage(bitmapToFill);
+		//		graphicsToFill.DrawImage(bitmapForDraw, 0, 0, new Rectangle(0, 0, bitmapForDraw.Width, bitmapForDraw.Height), GraphicsUnit.Pixel);
+
+		//		if (pm.HasStamps && pm.StampSaveTypeChosen != ExtraObjectsSaveType.Lose)//отрисовали штампы
+		//		{
+		//			graphicsToFill.DrawStamps(pm, false);
+		//		}
+
+		//		if (pm.HasTiffAnnotations && pm.TiffAnnotationSaveTypeChosen != ExtraObjectsSaveType.Lose)//отрисовали заметки
+		//		{
+		//			graphicsToFill.DrawTiffAnnotations(pm, tav, false);
+		//		}
+
+		//		if (pm.HasTitles && drawTitles)//отрисовали надписи
+		//		{
+		//			graphicsToFill.DrawTitles(pm);
+		//		}
+
+		//		//пересечение выделения и кропа
+		//		var intersectRectangle = pm.RectangleSelectionInner;
+		//		intersectRectangle.Intersect(pm.RectangleCrop);
+
+		//		var area =
+		//			printArea == PrintArea.Selection &&
+		//			intersectRectangle.Width > 0 &&
+		//			intersectRectangle.Height > 0 ?
+		//				intersectRectangle :
+		//				pm.RectangleCrop;
+
+		//		using var areaBitmap = new Bitmap(area.Width, area.Height);
+		//		areaBitmap.SetResolution((float)pm.DpiX, (float)pm.DpiY);
+		//		var graphicsArea = Graphics.FromImage(areaBitmap);
+		//		graphicsArea.DrawImage(bitmapToFill, new Rectangle(new Point(), area.Size), area, GraphicsUnit.Pixel);
+		//		areaBitmap.RotateFlip(pm.RotateFlipType);//повернули, отразили
+
+		//		var isAreaLandscape = areaBitmap.Width > areaBitmap.Height;
+		//		var cr = ps.PrintableArea;
+		//		var isPrinterLandscape = ps.Landscape;
+
+		//		needToRotate =
+		//			isPrinterLandscape && printOrientation == PrintOrientation.Portrait ||
+		//			!isPrinterLandscape && printOrientation == PrintOrientation.Landscape ||
+		//			isAreaLandscape != isPrinterLandscape && printOrientation == PrintOrientation.Auto ||
+		//			false;
+
+		//		if (needToRotate)
+		//		{
+		//			areaBitmap.RotateFlip(RotateFlipType.Rotate90FlipNone);
+		//		}
+
+		//		var areaInchWidth = areaBitmap.Width / areaBitmap.HorizontalResolution;//ширина в дюймах печатной области документа
+		//		var areaInchHeight = areaBitmap.Height / areaBitmap.VerticalResolution;//высота в дюймах печатной области документа
+
+		//		var printInchWidth = (isPrinterLandscape ? ps.PaperSize.Height : ps.PaperSize.Width) / 100f;//ширина в дюймах листа печати
+		//		var printInchHeight = (isPrinterLandscape ? ps.PaperSize.Width : ps.PaperSize.Height) / 100f;//высота в дюймах листа печати
+
+		//		var width = isPrinterLandscape ? cr.Height : cr.Width;
+		//		var height = isPrinterLandscape ? cr.Width : cr.Height;
+
+		//		var drawRectangle = new RectangleF(//приведение к размерам прямоугольника печати с учётом физических размеров документа и бумаги
+		//			0, 0,
+		//			areaInchWidth * width / printInchWidth,
+		//			areaInchHeight * height / printInchHeight);
+
+		//		if (drawRectangle.Width > width || drawRectangle.Height > height)
+		//		{
+		//			fitScale = true;
+		//		}
+
+		//		if (fitScale)
+		//		{
+		//			var k1 = width / drawRectangle.Width;
+		//			var k2 = height / drawRectangle.Height;
+
+		//			var k = Math.Min(k1, k2);
+
+		//			if (k != 1)
+		//			{
+		//				drawRectangle = new RectangleF(0, 0, drawRectangle.Width * k, drawRectangle.Height * k);
+		//			}
+		//		}
+
+		//		drawRectangle.Offset(new PointF(ps.Margins.Left, ps.Margins.Top));//отступаем поля
+
+		//		if (needToRotate)//сдвигаем по необходимости к нужному краю
+		//		{
+		//			drawRectangle.Offset(width - drawRectangle.Width, 0);
+		//		}
+
+		//		pea.Graphics.DrawImage(areaBitmap, drawRectangle);
+
+		//		if (useBorder)//для предпросмотра границы изображения на бумаге
+		//		{
+		//			pea.Graphics.DrawRectangle(
+		//				new Pen(Brushes.Gray) { DashStyle = DashStyle.Dash, DashPattern = [5, 10] },
+		//				new Rectangle((int)drawRectangle.X, (int)drawRectangle.Y, (int)drawRectangle.Width, (int)drawRectangle.Height));
+		//		}
+		//	}
+		//}
+
+		//#region tiff annotations
+		public static int GetParsedIndex(this string index) =>
+			int.TryParse(index, out int res) ? res : int.MaxValue;
+
+		//private static void DrawTiffAnnotationImageData(this Graphics g, AN_IMAGE_STRUCT imageData, Rectangle bounds)
+		//{
+		//	if (!(imageData is null) && imageData.DibInfo is byte[] imb && imb.Length > 0)
+		//	{
+		//		using var ms = new MemoryStream(imb.GetBitmapBytesFromDibBytes());
+		//		using var bm = new Bitmap(ms);
+		//		bm.MakeTransparent();
+		//		g.DrawImage(bm, bounds);
+		//	}
+		//}
+
+		//private static void DrawTiffAnnotationSimpleTextData(this Graphics g, OIAN_TEXTPRIVDATA textdata, Font font, Color textColor, Rectangle bounds)
+		//{
+		//	if (!(textdata is null) && !string.IsNullOrEmpty(textdata.SzAnoText) && !(font is null))
+		//	{
+		//		var text = textdata.SzAnoText;
+
+		//		var angle = textdata.NCurrentOrientation / 10;
+		//		var x = angle == 0 || angle == 90 ? bounds.Left : bounds.Right;
+		//		var y = angle == 0 || angle == 270 ? bounds.Top : bounds.Bottom;
+		//		var drawRectangle = new RectangleF(0, 0, bounds.Width, bounds.Height);
+
+		//		g.TranslateTransform(x, y);
+		//		g.RotateTransform(-angle);
+		//		g.DrawString(text, font, new SolidBrush(textColor), drawRectangle);
+		//		g.RotateTransform(angle);
+		//		g.TranslateTransform(-x, -y);
+		//	}
+		//}
+
+		//private static void DrawTiffAnnotationTextWithBackgroundData(this Graphics g, OIAN_TEXTPRIVDATA textdata, Font font, Color textColor, uint thickness, Color backColor, Rectangle bounds)
+		//{
+		//	var frameColor = Color.Black;
+		//	g.FillRectangle(new SolidBrush(backColor), bounds);
+		//	g.DrawRectangle(new Pen(frameColor, thickness), bounds);
+		//	g.DrawTiffAnnotationSimpleTextData(textdata, font, textColor, bounds);
+		//}
+
+		//private static void DrawTiffAnnotationMarker(this Graphics g, Color color, Rectangle bounds) => g.FillRectangle(new SolidBrush(color), bounds);
+
+		//private static void DrawTiffAnnotationFrame(this Graphics g, Color color, uint thickness, Rectangle bounds) => g.DrawRectangle(new Pen(color, thickness), bounds);
+
+		//private static void DrawTiffAnnotations(this Graphics g, PageModel pm, TiffAnnotationView tav, bool useSelection = true)
+		//{
+		//	foreach (var am in pm.TiffAnnotations)
+		//	{
+		//		var ma = am.TiffAnnotationItem;
+		//		var OiGroup = ma.OiGroup;
+
+		//		if (
+		//			tav.FilteringTiffAnnotations == FilteringTiffAnnotationsType.HideAll ||
+		//			tav.FilteringTiffAnnotations == FilteringTiffAnnotationsType.ShowGroup &&
+		//				(tav.TiffAnnotationOiGroups is null || !tav.TiffAnnotationOiGroups.Contains(OiGroup)) ||
+		//			tav.FilteringTiffAnnotations == FilteringTiffAnnotationsType.ShowCurrentUserOnly &&
+		//				OiGroup != tav.TiffAnnotationOiGroupCurrentUser)
+		//		{
+		//			continue;
+		//		}
+
+		//		var imageData = ma.OiDIB_AN_IMAGE_STRUCT;
+		//		var rotateData = ma.OiAnoDat_AN_NEW_ROTATE_STRUCT;
+
+		//		var fontData = ma.LfFont;
+		//		var font = fontData.GetFont();
+		//		var bounds = ma.LrBounds;
+		//		var color1 = ma.RgbColor1;
+		//		var color2 = Color.FromArgb(255, ma.RgbColor2);
+		//		var thickness = ma.ULineSize;
+		//		var textData = ma.OiAnText_OIAN_TEXTPRIVDATA;
+
+		//		var rotateflip = rotateData is null ? RotateFlipType.RotateNoneFlipNone : (RotateFlipType)(rotateData.Rotation - 1);
+		//		var annotationWidth = ((int)rotateflip) % 2 == 0 ? bounds.Width : bounds.Height;
+		//		var annotationHeight = ((int)rotateflip) % 2 == 0 ? bounds.Height : bounds.Width;
+
+		//		using (var annotationBitmap = new Bitmap(annotationWidth, annotationHeight))
+		//		{
+		//			annotationBitmap.SetResolution((float)pm.DpiX, (float)pm.DpiY);
+		//			var ga = Graphics.FromImage(annotationBitmap);
+
+		//			if (ma.UType == TiffAnnotationMarkType.FilledRectangle)
+		//			{
+		//				ga.DrawTiffAnnotationMarker(color1, new Rectangle(new Point(), annotationBitmap.Size));
+		//			}
+		//			else if (ma.UType == TiffAnnotationMarkType.HollowRectangle)
+		//			{
+		//				ga.DrawTiffAnnotationFrame(color1, thickness, new Rectangle(new Point(), annotationBitmap.Size));
+		//			}
+		//			else if (ma.UType == TiffAnnotationMarkType.TypedText)
+		//			{
+		//				ga.DrawTiffAnnotationSimpleTextData(textData, font, color2, new Rectangle(new Point(), annotationBitmap.Size));
+		//			}
+		//			else if (ma.UType == TiffAnnotationMarkType.AttachNote)
+		//			{
+		//				ga.DrawTiffAnnotationTextWithBackgroundData(textData, font, color2, thickness, color1, new Rectangle(new Point(), annotationBitmap.Size));
+		//			}
+
+		//			ga.DrawTiffAnnotationImageData(imageData, new Rectangle(new Point(), annotationBitmap.Size));
+		//			annotationBitmap.RotateFlip(rotateflip);
+		//			g.DrawImage(annotationBitmap, bounds);
+		//		}
+
+		//		if (useSelection && am.IsSelected && !pm.IsSaving)
+		//		{
+		//			g.FillRectangle(pm.BrushTiffAnnotation, bounds);
+		//		}
+		//	}
+		//}
+		//#endregion
+
+		//#region stamps
+		//private static void DrawStamps(this Graphics g, PageModel pm, bool useSelection = true)
+		//{
+		//	foreach (var stamp in pm.Stamps)
+		//	{
+		//		using var ms = new MemoryStream(stamp.BytesBitmap);
+		//		using var stampBitmap = new Bitmap(ms);
+		//		//stampBitmap.MakeTransparent();
+		//		stampBitmap.RotateFlip(RotateFlipType.RotateNoneFlipNone.Substract(stamp.RotateFlipInitial));
+		//		var stampRectangle = new Rectangle(new Point(), stamp.RectangleStamp.Size);
+		//		var k = (int)stamp.RotateFlipInitial < 4 ? 1 : -1;//с отражением/без
+
+		//		var dx1 = stamp.RectangleStamp.Left;//смещение центра отрисовки в TL штампа по x
+		//		var dy1 = stamp.RectangleStamp.Top;//смещение центра отрисовки в TL штампа по y
+		//		var dx2 = stamp.RectangleStamp.Width / 2;//смещение центра отрисовки к центру штампа по x
+		//		var dy2 = stamp.RectangleStamp.Height / 2;//смещение центра отрисовки к центру штампа по y
+
+		//		g.TranslateTransform(dx1 + dx2, dy1 + dy2);//смещения начала координат отрисовки к центру штампа
+		//		g.RotateTransform(stamp.Angle * k);//поворот вокруг центра штампа
+		//		g.TranslateTransform(-dx2, -dy2);//смещение к TL Штампа
+
+		//		if (useSelection && stamp.IsSelected && stamp.SetStampType == SetStampType.OnLocation && !pm.IsSaving)//отрисовка рамки и подсветки штампа
+		//		{
+		//			g.DrawRectangle(pm.GetPenStamp(stampRectangle), stampRectangle);
+		//			g.FillRectangle(pm.BrushStamp, stampRectangle);
+		//		}
+
+		//		g.DrawImage(stampBitmap, stampRectangle);//отрисовка штампа
+		//		g.RotateTransform(stamp.Angle * -k);//поворот назад
+
+		//		var r2 = Math.Sqrt(dx2 * dx2 + dy2 * dy2);//диагональ от TL штампа к его центру
+		//		var angle2 = Math.Atan2(dy2, dx2);//угол диагонали
+		//		var angle3 = angle2 + Math.PI * stamp.Angle * k / (float)180;//угол новой диагонали с учётом поворота
+		//		var dx3 = (float)(r2 * Math.Cos(angle3)) - dx2;//доп смещение по x
+		//		var dy3 = (float)(r2 * Math.Sin(angle3)) - dy2;//доп смещение по y
+		//		g.TranslateTransform(dx3, dy3);//учёт доп.смещения при повороте 
+
+		//		g.TranslateTransform(-dx1, -dy1);//возврат начала координат к точке (0, 0)
+		//	}
+		//}
+		//#endregion
+
+		//#region titles
+		//private static void SetTransformMatrix(this Graphics g, PageModel pm)
+		//{
+		//	float m11 = 1;
+		//	float m12 = 0;
+		//	float m21 = 0;
+		//	float m22 = 1;
+		//	float dx = 0;
+		//	float dy = 0;
+
+		//	if (pm.FlipXType == FlipXType.FlipX)
+		//	{
+		//		m11 = -1;
+		//		dx = g.VisibleClipBounds.Width;
+		//	}
+
+		//	if (pm.FlipYType == FlipYType.FlipY)
+		//	{
+		//		m22 = -1;
+		//		dy = g.VisibleClipBounds.Height;
+		//	}
+
+		//	var matrix = new System.Drawing.Drawing2D.Matrix(m11, m12, m21, m22, dx, dy);
+
+		//	switch (pm.RotateType)
+		//	{
+		//		case RotateType.ToRight90:
+		//			matrix.Rotate(-90);
+		//			break;
+		//		case RotateType.UpDown:
+		//			matrix.Rotate(-180);
+		//			break;
+		//		case RotateType.ToLeft90:
+		//			matrix.Rotate(90);
+		//			break;
+		//	}
+
+		//	g.Transform = matrix;
+		//}
+
+		//private static Font GetSizedFont(this Graphics g, string text, Font font, float length, bool isHeight)
+		//{
+		//	var textRec = g.MeasureString(text, font);
+		//	var textSize = isHeight ? textRec.Height : textRec.Width;
+		//	var k = length / textSize;
+		//	var newFontSize = font.Size * k;
+		//	newFontSize = newFontSize < 2 ? 2 : newFontSize;
+		//	var newFont = new Font(font.FontFamily, newFontSize, GraphicsUnit.Point);
+
+		//	return newFont;
+		//}
+
+		//private static void DrawDiagonalTitle(this Graphics g, TitleModel title)
+		//{
+		//	var text = title.Text;
+		//	var pm = title.PageModelParent;
+
+		//	var diag = Math.Sqrt(g.VisibleClipBounds.Width * g.VisibleClipBounds.Width +
+		//		g.VisibleClipBounds.Height * g.VisibleClipBounds.Height);//диагональ
+
+		//	//нормализуем высоту шрифта
+		//	Font newFont = g.GetSizedFont(text, title.Font, (float)(diag * title.RelativeHigh), true);
+		//	var titleRec = g.MeasureString(title.Text, newFont);
+
+		//	g.SetTransformMatrix(pm);//обратно поворачиваем и отражаем объект рисования, чтобы при применении поворотов и отражений отображалось верно
+		//	var clipRec = g.VisibleClipBounds;//прямоугольник отрисовки
+
+		//	if (clipRec.Height == 0 || clipRec.Width == 0)
+		//	{
+		//		return;//иначе тангенсы бесконечны
+		//	}
+
+		//	var shiftX = clipRec.Width / 2;
+		//	var shiftY = clipRec.Height / 2;
+
+		//	switch (pm.RotateType)
+		//	{
+		//		case RotateType.ToRight90:
+		//			shiftX = -shiftX;
+		//			break;
+		//		case RotateType.UpDown:
+		//			shiftX = -shiftX;
+		//			shiftY = -shiftY;
+		//			break;
+		//		case RotateType.ToLeft90:
+		//			shiftY = -shiftY;
+		//			break;
+		//	}
+
+		//	g.TranslateTransform(shiftX, shiftY);//сдвигаем начало координат к центру
+
+		//	var angleR = Math.Atan2(clipRec.Height, clipRec.Width);//угол поворота в радианах
+		//	angleR = title.VerticalAlignment == TitleVerticalAlignment.DiagonalLBRT ? -angleR : angleR;
+		//	var angleG = angleR * 180 / Math.PI;//угол поворота в градусах
+		//	var tan = Math.Tan(Math.Abs(angleR));
+		//	var tanCorrection = Math.Max(tan, 1 / tan);//поправка, нужна для расчёта сдвига текста, чтобы его края не заходили за край
+
+		//	g.RotateTransform((float)angleG);//поворачиваем
+
+		//	if (title.HorizontalAlignment == TitleHorizontalAlignment.Multiple)//размножаем текст
+		//	{
+		//		while (titleRec.Width < diag)
+		//		{
+		//			text += $" {title.Text}";
+		//			titleRec = g.MeasureString(text, newFont);
+		//		}
+		//	}
+		//	else if (title.HorizontalAlignment == TitleHorizontalAlignment.Stretched)//растягиваем текст
+		//	{
+		//		var diagShort = diag / (1 + tanCorrection * titleRec.Height / titleRec.Width);
+		//		newFont = g.GetSizedFont(text, title.Font, (float)diagShort, false);
+		//		titleRec = g.MeasureString(text, newFont);
+		//	}
+
+		//	var y = -(float)(titleRec.Height / 2);//смещаем на полувысоту
+		//	var x =
+		//		title.HorizontalAlignment == TitleHorizontalAlignment.Centre ?
+		//		-(float)(titleRec.Width / 2) :
+		//		-(float)(diag / 2 + y * tanCorrection);
+
+		//	//пишем текст
+		//	g.DrawString(text, newFont, new SolidBrush(title.Color), x, y);
+
+		//	//разворачиваем обратно и возвращаем центр
+		//	g.RotateTransform(-(float)angleG);
+		//	g.TranslateTransform(-shiftX, -shiftY);
+		//}
+
+		//private static void DrawHorizontalTitle(this Graphics g, TitleModel title)
+		//{
+		//	var text = title.Text;
+		//	var pm = title.PageModelParent;
+		//	var diag = Math.Sqrt(g.VisibleClipBounds.Width * g.VisibleClipBounds.Width +
+		//		g.VisibleClipBounds.Height * g.VisibleClipBounds.Height);//диагональ
+
+		//	//нормализуем высоту шрифта
+		//	Font newFont = g.GetSizedFont(text, title.Font, (float)(diag * title.RelativeHigh), true);
+		//	var titleRec = g.MeasureString(title.Text, newFont);
+
+		//	g.SetTransformMatrix(pm);//обратно поворачиваем и отражаем объект рисования, чтобы при применении поворотов и отражений отображалось верно
+		//	var clipRec = g.VisibleClipBounds;//прямоугольник отрисовки
+
+		//	var x = clipRec.Left;
+		//	var y = clipRec.Top;
+
+		//	if (title.HorizontalAlignment == TitleHorizontalAlignment.Stretched)//растягиваем текст
+		//	{
+		//		newFont = g.GetSizedFont(text, title.Font, clipRec.Width, false);
+		//		titleRec = g.MeasureString(text, newFont);
+		//	}
+
+		//	//центрируем высоту
+		//	if (title.VerticalAlignment == TitleVerticalAlignment.Middle)
+		//	{
+		//		y += (clipRec.Height - titleRec.Height) / 2;
+		//	}
+		//	else if (title.VerticalAlignment == TitleVerticalAlignment.Bottom)
+		//	{
+		//		y += clipRec.Height - titleRec.Height;
+		//	}
+
+		//	//центрируем левый край
+		//	if (title.HorizontalAlignment == TitleHorizontalAlignment.Centre)
+		//	{
+		//		x += (clipRec.Width - titleRec.Width) / 2;
+		//	}
+		//	else if (title.HorizontalAlignment == TitleHorizontalAlignment.Multiple)
+		//	{
+		//		while (titleRec.Width < clipRec.Width)
+		//		{
+		//			text += $" {title.Text}";
+		//			titleRec = g.MeasureString(text, newFont);
+		//		}
+		//	}
+
+		//	//пишем текст
+		//	g.DrawString(text, newFont, new SolidBrush(title.Color), x, y);
+		//}
+
+		//private static void DrawTitles(this Graphics g, PageModel pm)
+		//{
+		//	foreach (var title in pm.Titles.Where(x => !string.IsNullOrEmpty(x.Text)))
+		//	{
+		//		if (title.IsDiagonal)
+		//		{
+		//			g.DrawDiagonalTitle(title);
+		//		}
+		//		else
+		//		{
+		//			g.DrawHorizontalTitle(title);
+		//		}
+		//	}
+		//}
+		//#endregion
+
+		//private static void FillBitmap(Bitmap bitmapToFill, PageModel pm, TiffAnnotationView tav, bool drawTitles)
+		//{
+		//	var graphicsToFill = Graphics.FromImage(bitmapToFill);
+
+		//	if (pm.RectangleCrop.Width < pm.WidthPXLOrigin || pm.RectangleCrop.Height < pm.HeightPXLOrigin)
+		//	{
+		//		graphicsToFill.Clear(SystemColors.ControlLight);
+		//		graphicsToFill.SetClip(pm.RectangleCrop);//маска для кропа
+		//	}
+
+		//	graphicsToFill.DrawImage(pm.BitmapForView, 0, 0, new Rectangle(0, 0, pm.BitmapForView.Width, pm.BitmapForView.Height), GraphicsUnit.Pixel);
+
+		//	if (pm.HasStamps && pm.StampSaveTypeChosen != ExtraObjectsSaveType.Lose)//отрисовали штампы
+		//	{
+		//		graphicsToFill.DrawStamps(pm);
+		//	}
+
+		//	if (pm.HasTiffAnnotations && pm.TiffAnnotationSaveTypeChosen != ExtraObjectsSaveType.Lose)//отрисовали заметки
+		//	{
+		//		graphicsToFill.DrawTiffAnnotations(pm, tav);
+		//	}
+
+		//	if (pm.HasTitles && drawTitles)//отрисовали надписи
+		//	{
+		//		graphicsToFill.DrawTitles(pm);
+		//	}
+
+		//	bitmapToFill.RotateFlip(pm.RotateFlipType);//повернули/отразили
+		//}
+
+		//private static void DrawFinalImageAndFillBack(PaintEventArgs pea, Image image, Point shift, Size drawSize, Color backColor)
+		//{
+		//	var dr = new Rectangle(shift, drawSize);//прямоугольник в который рисуется объект рисования
+		//	var cr = pea.ClipRectangle;//большой прямоугольник, в котором всё рисуется
+
+		//	var r1 = new Rectangle(cr.X, cr.Y, dr.X - cr.X, cr.Height);//прямоугольник слева от объекта рисования
+		//	var r2 = new Rectangle(dr.Right, cr.Y, cr.Right - dr.Right, cr.Height);//прямоугольник справа от объекта рисования
+		//	var r3 = new Rectangle(dr.X, cr.Y, dr.Width, dr.Y - cr.Y);//прямоугольник сверху от объекта рисования
+		//	var r4 = new Rectangle(dr.X, dr.Bottom, dr.Width, cr.Bottom - dr.Bottom);//прямоугольник снизу от объекта рисования
+
+		//	pea.Graphics.DrawImage(image, dr);//отрисовали в размере со сдвигом
+		//	var backBrush = new SolidBrush(backColor);
+		//	pea.Graphics.FillRectangle(backBrush, r1);//залили фоном всё, что вне объекта рисования
+		//	pea.Graphics.FillRectangle(backBrush, r2);//залили фоном всё, что вне объекта рисования
+		//	pea.Graphics.FillRectangle(backBrush, r3);//залили фоном всё, что вне объекта рисования
+		//	pea.Graphics.FillRectangle(backBrush, r4);//залили фоном всё, что вне объекта рисования
+		//}
+
+		//private static void OutlineSelections(PaintEventArgs pea, PageModel pm, Point shift, Size drawSize, bool isSelecting)
+		//{
+		//	if (isSelecting)
+		//	{
+		//		pea.Graphics.DrawRectangle(
+		//			whitePen, pm.GetOuterSelectionRectangle(drawSize, shift));
+		//		pea.Graphics.DrawRectangle(
+		//			selectionPen, pm.GetOuterSelectionRectangle(drawSize, shift));
+		//	}
+
+		//	if (pm.TiffAnnotationSelected is TiffAnnotationModel am)
+		//	{
+		//		pea.Graphics.DrawRectangle(
+		//			whitePen,
+		//			pm.GetOuterSelectionRectangle(drawSize, shift, am.TiffAnnotationItem.LrBounds));
+		//		pea.Graphics.DrawRectangle(
+		//			selectionExtra,
+		//			pm.GetOuterSelectionRectangle(drawSize, shift, am.TiffAnnotationItem.LrBounds));
+		//	}
+		//}
+
+		///// <summary>
+		///// отрисовывает страницу с учётом выбранных параметров и возвращает новое значение масштаба
+		///// </summary>
+		///// <param name="pea">PaintEventArgs, в который рисуется</param>
+		///// <param name="panel">панель отрисовки - нужна только для цвета фона</param>
+		///// <param name="pm">модель страницы</param>
+		///// <param name="dst">тип масштабирования</param>
+		///// <param name="scale">масштаб</param>
+		///// <param name="shift">сдвиг страницы на панели</param>
+		///// <param name="isSelecting">если true -- состояние выделения фрагмента</param>
+		///// <param name="tav">способ фильтрации заметок</param>
+		///// <param name="drawTitles">если true, то надписи отрисовываются</param>
+		///// <returns>новый масштаб</returns>
+		//public static double DrawPageModel(
+		//	this PaintEventArgs pea, Panel panel, PageModel pm, DrawSizeType dst, double scale, Point shift, bool isSelecting,
+		//	TiffAnnotationView tav, bool drawTitles = true, Func<PageModel, Bitmap> getOuterBitmap = null)
+		//{
+		//	var newScale = 0.0;
+		//	Size outerSize = panel.Size;
+
+		//	if (!pm.IsDisposing)
+		//	{
+		//		if (getOuterBitmap is null)
+		//		{
+		//			using var bitmapToFill = pm.GetBitmapToFill();
+		//			FillBitmap(bitmapToFill, pm, tav, drawTitles);
+		//			var drawSize = pm.GetDrawSizeForPage(outerSize, dst, scale);//посчитали размер, в который рисуем
+		//			newScale = drawSize.Width / (double)bitmapToFill.Width;
+		//			DrawFinalImageAndFillBack(pea, bitmapToFill, shift, drawSize, panel.BackColor);
+		//			OutlineSelections(pea, pm, shift, drawSize, isSelecting);
+		//		}
+		//		else
+		//		{
+		//			shift = new Point();
+		//			using Bitmap bitmapToFill = getOuterBitmap(pm);
+		//			Size drawSize = pm.GetDrawSizeForOuterBitmap(bitmapToFill, outerSize, dst, scale);
+		//			newScale = drawSize.Width / (double)bitmapToFill.Width;
+		//			DrawFinalImageAndFillBack(pea, bitmapToFill, shift, drawSize, panel.BackColor);
+		//		}
+		//	}
+
+		//	return newScale;
+		//}
+		#endregion
+
+		#region write common
+		//private static void FillAndTransformResultBitmapFromColorPageImageAndTiffAnnotations(
+		//	this Bitmap res, Image pageImage, PageModel pm, TiffAnnotationView tav, bool drawTitles = false)
+		//{
+		//	res.SetResolution((float)pm.DpiX, (float)pm.DpiY);
+		//	var graphicsToFill = Graphics.FromImage(pageImage);
+		//	graphicsToFill.DrawImage(pageImage, 0, 0, new Rectangle(0, 0, pageImage.Width, pageImage.Height), GraphicsUnit.Pixel);
+
+		//	if (pm.HasStamps && pm.StampSaveTypeChosen == ExtraObjectsSaveType.Burn)//отрисовали штампы
+		//	{
+		//		graphicsToFill.DrawStamps(pm);
+		//	}
+
+		//	if (pm.HasTiffAnnotations && pm.TiffAnnotationSaveTypeChosen == ExtraObjectsSaveType.Burn)//отрисовали заметки
+		//	{
+		//		graphicsToFill.DrawTiffAnnotations(pm, tav);
+		//	}
+
+		//	if (pm.HasTitles && drawTitles)//отрисовали надписи
+		//	{
+		//		graphicsToFill.DrawTitles(pm);
+		//	}
+
+		//	var graphicsRes = Graphics.FromImage(res);
+		//	graphicsRes.DrawImage(pageImage, 0, 0, pm.RectangleCrop, GraphicsUnit.Pixel);
+
+		//	res.RotateFlip(pm.RotateFlipType);//повернули/отразили
+		//}
+
+		//private static void FillAndTransformResultBitmapFromPageImageAndTiffAnnotations(this Bitmap res, Image pageImage, PageModel pm, TiffAnnotationView tav)
+		//{
+		//	if (pageImage.IsBWColorViaSystemDrawing(out _))//преобразуем в 24бит битмап, иначе из него не взять Graphics
+		//	{
+		//		var myImageCodecInfo =
+		//		ImageCodecInfo.GetImageEncoders()
+		//		.Where(x => x.MimeType == "image/tiff")
+		//		.FirstOrDefault();
+
+		//		var myEncoder = Encoder.ColorDepth;
+		//		var myEncoderParameters = new EncoderParameters(1);
+		//		var myEncoderParameter = new EncoderParameter(myEncoder, 24L);
+		//		myEncoderParameters.Param[0] = myEncoderParameter;
+
+		//		using MemoryStream ms = new MemoryStream();
+		//		pageImage.Save(ms, myImageCodecInfo, myEncoderParameters);
+
+		//		using Bitmap pageImageConvTo24bpp = new Bitmap(ms);
+		//		res.FillAndTransformResultBitmapFromColorPageImageAndTiffAnnotations(pageImageConvTo24bpp, pm, tav);
+		//	}
+		//	else
+		//	{
+		//		res.FillAndTransformResultBitmapFromColorPageImageAndTiffAnnotations(pageImage, pm, tav);
+		//	}
+		//}
+
+		private static void WriteFileBytesToFile(this byte[] tiffBytes, string newFileName)
+		{
+			using var destFileStream = File.Open(newFileName, FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite);
+			destFileStream.Write(tiffBytes, 0, tiffBytes.Length);
+			destFileStream.Flush();
+			destFileStream.Close();
+		}
+
+		/// <summary>
+		/// записывает Image Model в файл в заданном формате с учётом метки
+		/// </summary>
+		/// <param name="imageModel">модель</param>
+		/// <param name="newFileName">имя файла, в который пишется</param>
+		/// <param name="useMark">если true, то используем метку</param>
+		/// <param name="mark">метка</param>
+		/// <param name="tav">способ фильтрации заметок</param>
+		/// <param name="testTiffTags">если true, то в случае ошибки копирования/записи tiff тагов при записи файла, не запускается лечение. нужно для тестирования проблемых форматов tiff</param>
+		public static void WriteImageModelToFile(this ImageModel imageModel, string newFileName, bool useMark, string mark, TiffAnnotationView tav, bool testTiffTags = false) =>
+			imageModel.GetImageModelBytes(useMark, mark, tav, testTiffTags).WriteFileBytesToFile(newFileName);
+
+		/// <summary>
+		/// возвращает байтовый массив, соответствующий файлу, в который сохраняется Image Model в заданном формате с учётом метки
+		/// </summary>
+		/// <param name="imageModel">модель</param>
+		/// <param name="useMark">если true, то используем метку</param>
+		/// <param name="mark">метка</param>
+		/// <param name="tav">способ фильтрации заметок</param>
+		/// <param name="testTiffTags">если true, то в случае ошибки копирования/записи tiff тагов при записи файла, не запускается лечение. нужно для тестирования проблемых форматов tiff</param>
+		/// <returns>байтовый массив</returns>
+		public static byte[] GetImageModelBytes(this ImageModel imageModel, bool useMark, string mark, TiffAnnotationView tav, bool testTiffTags = false)
+		{
+			if (!useMark && !imageModel.HasBeenModified)
+			{
+				return imageModel.FileBytes;
+			}
+
+			return imageModel.ImageFileFormatChosen switch
+			{
+				ImageFileFormat.Tiff => imageModel.GetImageModelTiffBytes(useMark, mark, tav, testTiffTags),
+				ImageFileFormat.Pdf => imageModel.GetImageModelPdfBytes(useMark, mark, tav, testTiffTags),
+				_ => imageModel.FileBytes,
+			};
+		}
+		#endregion
+
+		#region write to pdf
+		private static void FillPdfMemoryStreamFromTiffStream(this Tiff tstream, MemoryStream mstream)
+		{
+			T2P t2p = new T2P
+			{
+				m_testFriendly = false,
+				m_outputdisable = false,
+				m_pdf_defaultcompression = t2p_compress_t.T2P_COMPRESS_ZIP,
+				m_outputfile = mstream,
+			};
+
+			using var output2 = Tiff.ClientOpen("in-memory", "w", t2p, t2p.m_stream);
+			if (output2 == null)
+			{
+				t2p.m_outputfile.Dispose();
+				Tiff.Error(tstream, Tiff2PdfConstants.TIFF2PDF_MODULE, "Can't initialize output descriptor");
+				return;
+			}
+
+			t2p.validate();
+			object client = output2.Clientdata();
+			TiffStream stream = output2.GetStream();
+			stream.Seek(client, 0, SeekOrigin.Begin);
+			t2p.write_pdf(tstream, output2);
+
+			if (t2p.m_error)
+			{
+				t2p.m_outputfile.Dispose();
+				Tiff.Error(tstream, Tiff2PdfConstants.TIFF2PDF_MODULE, "An error occurred creating output PDF file");
+				return;
+			}
+		}
+
+		//private static itst.pdf.PdfRectangle GetFragmentRectangleOnTheRotatedPage(
+		//	itst.pdf.PdfRectangle fragment, itst.Rectangle page, int numberOfRightRotations)
+		//{
+		//	numberOfRightRotations = (numberOfRightRotations + 4) % 4;
+		//	var isRotated = numberOfRightRotations % 2 != 0;
+		//	var width = isRotated ? page.Height : page.Width;
+		//	var height = isRotated ? page.Width : page.Height;
+
+		//	switch (numberOfRightRotations)
+		//	{
+		//		case 0:
+		//			return fragment;
+		//		case 1:
+		//			return new itst.pdf.PdfRectangle(
+		//				fragment.Bottom, width - fragment.Right,
+		//				fragment.Top, width - fragment.Left);
+		//		case 2:
+		//			return new itst.pdf.PdfRectangle(
+		//				width - fragment.Right, height - fragment.Top,
+		//				width - fragment.Left, height - fragment.Bottom);
+		//		case 3:
+		//			return new itst.pdf.PdfRectangle(
+		//				height - fragment.Top, fragment.Left,
+		//				height - fragment.Bottom, fragment.Right);
+		//		default:
+		//			throw new ArgumentException("wrong number of right rotations");
+
+		//	}
+		//}
+
+		//private static itst.pdf.PdfRectangle GetCropItstPdfRectangle(this itst.pdf.PdfReader pdfReader, PageModel pm, int? index = null)
+		//{
+		//	var newIndex = index is int i ? i : pm.PageNumberInitial;
+		//	var page = pdfReader.GetPageSize(newIndex + 1);//прямоугольник страницы
+		//	var pr = pdfReader.GetPageRotation(newIndex + 1);//поворот в градусах
+		//	var nr = pr / 90;//число поворотов 
+
+		//	var isRotated = nr % 2 != 0;
+
+		//	var width = isRotated ? page.Height : page.Width;
+		//	var height = isRotated ? page.Width : page.Height;
+		//	var kx = width / pm.WidthPXLOrigin;
+		//	var ky = height / pm.HeightPXLOrigin;
+
+		//	//в координатах pdf (y вверх как в математике, а не как в компьютерной графике) до вращения
+		//	var llx = pm.RectangleCrop.Left * kx;
+		//	var lly = (pm.HeightPXLOrigin - pm.RectangleCrop.Bottom) * ky;
+		//	var urx = pm.RectangleCrop.Right * kx;
+		//	var ury = (pm.HeightPXLOrigin - pm.RectangleCrop.Top) * ky;
+
+		//	var crop = new itst.pdf.PdfRectangle(llx, lly, urx, ury);
+
+		//	//возвращаем к изначальной ориентации
+		//	return GetFragmentRectangleOnTheRotatedPage(crop, page, (4 - nr) % 4);
+		//}
+
+		//private static itst.Image GetItstImageFromCommonPageModel(this PageModel pm, Image pageImage, TiffAnnotationView tav)
+		//{
+		//	itst.Image im = null;
+
+		//	using (var res = new Bitmap(pm.RectangleCrop.Width, pm.RectangleCrop.Height))//битмап размера кропа
+		//	{
+		//		res.FillAndTransformResultBitmapFromPageImageAndTiffAnnotations(pageImage, pm, tav);
+		//		im = itst.Image.GetInstance(res, ImageFormat.Bmp);
+		//	}
+
+		//	return im;
+		//}
+
+		//private static void SetupItstImageFromPdfPageModel(this itst.Image im, PageModel pm, itst.pdf.PdfReader pdfReader)
+		//{
+		//	var cropRectangle = pdfReader.GetCropItstPdfRectangle(pm);
+		//	var w = pm.IsRotated ? cropRectangle.Height : cropRectangle.Width;
+		//	var h = pm.IsRotated ? cropRectangle.Width : cropRectangle.Height;
+		//	im.ScaleToFit(w, h);
+		//	im.Alignment = itst.Element.ALIGN_CENTER;
+		//	im.SetAbsolutePosition(0, 0);
+		//}
+
+		//private static itst.Image GetItstImageFromPdfPageModel(this PageModel pm, TiffAnnotationView tav)
+		//{
+		//	itst.Image im = null;
+
+		//	if (!pm.IsDisposing)
+		//	{
+		//		using var pdfReader = new itst.pdf.PdfReader(new MemoryStream(pm.ImageModelParent.FileBytes));//ридер исходного файла
+		//		using var bitmapForDraw = new Bitmap(pm.BitmapForView);
+		//		bitmapForDraw.SetResolution(pm.BitmapForView.HorizontalResolution, pm.BitmapForView.VerticalResolution);
+		//		im = pm.GetItstImageFromCommonPageModel(bitmapForDraw, tav);
+		//		im.SetupItstImageFromPdfPageModel(pm, pdfReader);
+		//	}
+
+		//	return im;
+		//}
+
+		//private static void AddRasterizedPageModelToPdf(this itst.pdf.PdfStamper stamper, PageModel pm, TiffAnnotationView tav)
+		//{
+		//	var im = pm.GetItstImageFromPageModel(tav);
+		//	stamper.InsertPage(pm.PageNumberSorted + 1, new itst.Rectangle(im.PlainWidth, im.PlainHeight));
+		//	stamper.GetOverContent(pm.PageNumberSorted + 1).AddImage(im);
+		//}
+
+		//private static void SetupItstImageFromTiffAndPlainImagePageModel(this itst.Image im, PageModel pm)
+		//{
+		//	im.Alignment = itst.Element.ALIGN_CENTER;
+		//	im.SetAbsolutePosition(0, 0);
+		//	var h = im.Height / pm.DpiY * 72;
+		//	var k = h * 100 / im.Height;
+		//	im.ScalePercent((float)k);//компенсация растягивания
+		//}
+
+		//private static itst.Image GetItstImageFromPageModel(this PageModel pm, TiffAnnotationView tav)
+		//{
+		//	itst.Image im = null;
+
+		//	if (!pm.IsDisposing)
+		//	{
+		//		if (pm.ImageFileFormatOrigin == ImageFileFormat.Pdf)
+		//		{
+		//			im = pm.GetItstImageFromPdfPageModel(tav);
+		//		}
+		//		else
+		//		{
+		//			var pageImage = pm.ImageModelParent.SourceType != SourceType.ImagesSource ? pm.BitmapForView : pm.ImageModelParent.ScanPagesInitial[pm.PageNumberInitial];
+
+		//			using var bitmapForDraw = new Bitmap(pageImage);
+		//			bitmapForDraw.SetResolution(pm.BitmapForView.HorizontalResolution, pm.BitmapForView.VerticalResolution);
+		//			im = pm.GetItstImageFromCommonPageModel(bitmapForDraw, tav);
+		//			im.SetupItstImageFromTiffAndPlainImagePageModel(pm);
+		//		}
+		//	}
+
+		//	return im;
+		//}
+
+		//private static void SetMarkToPdf(this PdfStamper stamper, PdfReader pdfReader, string mark)
+		//{
+		//	if (!pdfReader.IsMetadataEncrypted())
+		//	{
+		//		string w = "";
+		//		var infos = pdfReader.Info;
+
+		//		foreach (var info in infos)
+		//		{
+		//			if (info.Key == "Keywords")
+		//			{
+		//				w = info.Value;
+		//				infos.Remove("Keywords");
+		//				break;
+		//			}
+		//		}
+
+		//		infos.Add("Keywords", w + (String.IsNullOrEmpty(w) ? "" : " ") + mark);
+		//		stamper.MoreInfo = infos;
+		//	}
+		//}
+
+		private static byte[] AllRasterizedPdfPagesToPdfBytes(this List<PageModel> pagesToRender, bool useMark, string mark, TiffAnnotationView tav)//новый пдф, состоящий только из картинок
+		{
+			//if (pagesToRender.Any())
+			//{
+			//	var pm1 = pagesToRender.First();
+
+			//	using var ms = new MemoryStream();
+			//	var im1 = pm1.GetItstImageFromPageModel(tav);
+			//	var document = new itst.Document(new itst.Rectangle(im1.PlainWidth, im1.PlainHeight), 0, 0, 0, 0);
+			//	PdfWriter.GetInstance(document, ms).SetFullCompression();
+
+			//	document.Open();
+			//	document.Add(im1);
+			//	document.Close();
+
+			//	using var fs = new MemoryStream();//поток создаваемого файла
+			//	using var pdfReader2 = new itst.pdf.PdfReader(ms.GetBuffer());//ридер потока промежуточного результата
+			//	using var stamper = new itst.pdf.PdfStamper(pdfReader2, fs);//стампер для добавления растеризованных страниц
+			//	if (useMark && !string.IsNullOrEmpty(mark))
+			//	{
+			//		stamper.SetMarkToPdf(pdfReader2, mark);
+			//	}
+
+			//	foreach (var pm in pagesToRender.Where(x => x != pm1))
+			//	{
+			//		stamper.SetFullCompression();
+			//		stamper.AddRasterizedPageModelToPdf(pm, tav);
+			//	}
+
+			//	stamper.Close();
+			//	pdfReader2.Close();
+
+			//	return fs.ToArray();
+			//}
+
+			return null;
+		}
+
+		//private static void AddPdfSimplePageToPdf(this itst.pdf.PdfCopy copy, itst.pdf.PdfReader pdfReader, PageModel pm, int? index = null)
+		//{
+		//	var newIndex = index is int i ? i : pm.PageNumberInitial;
+
+		//	var cropRectangle = pdfReader.GetCropItstPdfRectangle(pm, index);//кроп в масштабе страницы пдф
+		//	var pageDict = pdfReader.GetPageN(newIndex + 1);
+
+		//	if (pm.HasBeenCroped)
+		//	{
+		//		pageDict.Put(PdfName.MEDIABOX, cropRectangle);
+		//	}
+
+		//	if (pm.RotateFlipType != RotateFlipType.RotateNoneFlipNone)
+		//	{
+		//		var startRotate = pageDict.Get(PdfName.ROTATE) is PdfNumber pdfn ? pdfn.IntValue : 0;
+		//		var currentRotate = (int)pm.RotateFlipType * 90;
+		//		var newRotate = (startRotate + currentRotate + 720) % 360;
+
+		//		pageDict.Put(PdfName.ROTATE, new itst.pdf.PdfNumber(newRotate));
+		//	}
+
+		//	var importedPage = copy.GetImportedPage(pdfReader, newIndex + 1);
+
+		//	copy.AddPage(importedPage);
+		//}
+
+		//private static void AddTiffSimplePageToPdf(this itst.pdf.PdfCopy copy, itst.pdf.PdfReader pdfReader, PageModel pm, int? index = null)
+		//{
+		//	var newIndex = index is int i ? i : pm.PageNumberInitial;
+		//	var importedPage = copy.GetImportedPage(pdfReader, newIndex + 1);
+
+		//	copy.AddPage(importedPage);
+		//}
+
+		private static byte[] GetImageModelPdfBytes(this ImageModel imageModel, bool useMark, string mark, TiffAnnotationView tav, bool testTiffTags = false)
+		{
+			return imageModel?.FileBytes;
+
+			//if (!useMark && !imageModel.HasBeenModified)
+			//{
+			//	return imageModel?.FileBytes;
+			//}
+
+			//var sortedPages = imageModel.GetSortedPages().ToList();
+			//var simplePdfPages = new List<PageModel>(); //страницы, не требующие растеризации (цветные pdf без отражений)
+			//var pagesToRenderForPdf = new List<PageModel>(); //страницы, которые нужно писать как растр (остальные pdf и простые картинки)
+
+			//foreach (var pm in sortedPages.Where(x => !x.Failed))
+			//{
+			//	if (pm.IsSimplePdf ||
+			//		pm.ImageFileFormatOrigin == ImageFileFormat.Tiff &&
+			//		!(pm.HasStamps && pm.StampSaveTypeChosen == ExtraObjectsSaveType.Burn) &&
+			//		!(pm.HasTiffAnnotations && pm.TiffAnnotationSaveTypeChosen == ExtraObjectsSaveType.Burn))
+			//	{
+			//		simplePdfPages.Add(pm);
+			//	}
+			//	else
+			//	{
+			//		pagesToRenderForPdf.Add(pm);
+			//	}
+			//}
+
+			//if (simplePdfPages.Any())
+			//{
+			//	using var newPdfDoc = new itst.Document();//создаваемый pdf документ
+			//	using var proxyPdfMemoryStream = new MemoryStream();//поток промежуточного результата
+			//	using var copy = new itst.pdf.PdfCopy(newPdfDoc, proxyPdfMemoryStream);//копир для простых страниц
+			//	newPdfDoc.Open();
+
+			//	foreach (var pm in simplePdfPages)
+			//	{
+			//		if (pm.ImageFileFormatOrigin == ImageFileFormat.Pdf)
+			//		{
+			//			using var imageStreamSource = new MemoryStream(pm.ImageModelParent.FileBytes);
+			//			using var pdfReaderOfInitialFile = new itst.pdf.PdfReader(imageStreamSource);//ридер исходного файла
+			//			copy.AddPdfSimplePageToPdf(pdfReaderOfInitialFile, pm);
+			//		}
+			//		else
+			//		{
+			//			using var proxyTiffMemoryStream = new MemoryStream();
+			//			using var proxyTiff = Tiff.ClientOpen("in-memory", "w", proxyTiffMemoryStream, new TiffStream());
+			//			using var tiffToPdfMemoryStream = new MemoryStream();
+			//			proxyTiff.WritePageModelToTiffDirectory(pm, 0, false, null, tav, testTiffTags);
+			//			proxyTiff.FillPdfMemoryStreamFromTiffStream(tiffToPdfMemoryStream);//создаём pdf файл в памяти, куда пишем 1 страницу. и из него потом берём копиром
+
+			//			tiffToPdfMemoryStream.Position = 0;
+
+			//			using var pdfReaderOfTiffToPdfMemoryStream = new itst.pdf.PdfReader(tiffToPdfMemoryStream);
+			//			copy.AddTiffSimplePageToPdf(pdfReaderOfTiffToPdfMemoryStream, pm, 0);
+			//		}
+			//	}
+
+			//	newPdfDoc.Close();
+
+			//	using var fs = new MemoryStream();//поток создаваемого файла
+			//	using var proxyPdfReader = new itst.pdf.PdfReader(proxyPdfMemoryStream.GetBuffer());//ридер потока промежуточного результата
+			//	using var stamper = new itst.pdf.PdfStamper(proxyPdfReader, fs);//стампер для добавления растеризованных страниц
+			//	stamper.SetFullCompression();
+
+			//	if (useMark && !string.IsNullOrEmpty(mark))
+			//	{
+			//		stamper.SetMarkToPdf(proxyPdfReader, mark);
+			//	}
+
+			//	foreach (var pm in pagesToRenderForPdf)
+			//	{
+			//		stamper.AddRasterizedPageModelToPdf(pm, tav);
+			//	}
+
+			//	stamper.Close();
+			//	proxyPdfReader.Close();
+
+			//	return fs.ToArray();
+			//}
+			//else
+			//{
+			//	return pagesToRenderForPdf.AllRasterizedPdfPagesToPdfBytes(useMark, mark, tav);
+			//}
+		}
+		#endregion
+
+		#region write to tiff
+		private static void SetPageTiffTags(this Tiff output, int index, int numberOfPages)
+		{
+			output.SetField(TiffTag.SUBFILETYPE, FileType.PAGE);
+			output.SetField(TiffTag.PAGENUMBER, index, numberOfPages);
+		}
+
+		private static void Set24bppTiffTags(this Tiff output, PageModel pm)
+		{
+			output.SetField(TiffTag.SAMPLESPERPIXEL, 3);
+			output.SetField(TiffTag.BITSPERSAMPLE, 8);
+			output.SetField(TiffTag.PHOTOMETRIC, Photometric.RGB);
+
+			if (pm.ImageFileFormatOrigin == ImageFileFormat.Jpg)
+			{
+				output.SetField(TiffTag.COMPRESSION, Compression.JPEG);
+			}
+			else
+			{
+				output.SetField(TiffTag.COMPRESSION, Compression.DEFLATE);
+			}
+
+			output.SetField(TiffTag.PLANARCONFIG, PlanarConfig.CONTIG);
+		}
+
+		private static void Set8bppTiffTags(this Tiff output)
+		{
+			output.SetField(TiffTag.SAMPLESPERPIXEL, 1);
+			output.SetField(TiffTag.BITSPERSAMPLE, 8);
+			output.SetField(TiffTag.PHOTOMETRIC, Photometric.MINISWHITE);//иначе в ios получается негативное изображение
+			output.SetField(TiffTag.COMPRESSION, Compression.DEFLATE);
+			output.SetField(TiffTag.FILLORDER, FillOrder.MSB2LSB);
+			output.SetField(TiffTag.STRIPOFFSETS, 0);
+		}
+
+		private static void SetSizeTiffTags(this Tiff output, int width, int height)
+		{
+			output.SetField(TiffTag.IMAGEWIDTH, width);
+			output.SetField(TiffTag.IMAGELENGTH, height);
+			output.SetField(TiffTag.ROWSPERSTRIP, height);
+		}
+
+		private static void SetResolutionInInchTiffTags(this Tiff output, float xRes, float yRes)
+		{
+			output.SetField(TiffTag.XRESOLUTION, xRes);
+			output.SetField(TiffTag.YRESOLUTION, yRes);
+			output.SetField(TiffTag.RESOLUTIONUNIT, ResUnit.INCH);
+		}
+
+		private static void WriteConvertedSamples(this Tiff output, byte[] raster, int width, int height, bool gray)
+		{
+			int stride = raster.Length / height;
+			const int samplesPerPixel = 3;
+
+			if (gray)//знаем, что растер полноцветный, но все каналы одинаковые. берём красный канал
+			{
+				for (int y = 0; y < height; y++)
+				{
+					int offset = stride * y;
+					int strideEnd = offset + width * samplesPerPixel;
+
+					var buffer = new byte[stride / samplesPerPixel];
+					var j = 0;
+
+					for (int i = offset; i < strideEnd; i += samplesPerPixel)
+					{
+						buffer[j++] = (byte)(255 - raster[i]);//потому что miniswhite!
+					}
+
+					output.WriteScanline([.. buffer], y);
+				}
+			}
+			else
+			{
+				for (int y = 0; y < height; y++)
+				{
+					int offset = stride * y;
+					int strideEnd = offset + width * samplesPerPixel;
+
+					for (int i = offset; i < strideEnd; i += samplesPerPixel)
+					{
+						byte temp = raster[i + 2];
+						raster[i + 2] = raster[i];
+						raster[i] = temp;
+					}
+
+					output.WriteScanline(raster, offset, y, 0);
+				}
+			}
+		}
+
+		private static Rect GetNewTiffAnnotationBounds(Size cropSize, Rect oldTiffAnnotationBounds, RotateFlipType RotateFlipType)
+		{
+			//selection всегда x2 > x1, y2 > y1;
+			var x1 = oldTiffAnnotationBounds.Left;
+			var y1 = oldTiffAnnotationBounds.Top;
+			var x2 = oldTiffAnnotationBounds.Right;
+			var y2 = oldTiffAnnotationBounds.Bottom;
+			var w0 = Math.Abs(x1 - x2);
+			var h0 = Math.Abs(y1 - y2);
+
+			Point p = new Point(x1, y1);
+			Size s = new Size(w0, h0);
+
+			switch (RotateFlipType)
+			{
+				case RotateFlipType.Rotate270FlipNone:
+					p = new Point(y1, cropSize.Width - x2);
+					s = new Size(h0, w0);
+					break;
+				case RotateFlipType.Rotate180FlipNone:
+					p = new Point(cropSize.Width - x2, cropSize.Height - y2);
+					break;
+				case RotateFlipType.Rotate90FlipNone:
+					p = new Point(cropSize.Height - y2, x1);
+					s = new Size(h0, w0);
+					break;
+				case RotateFlipType.RotateNoneFlipX:
+					p = new Point(cropSize.Width - x2, y1);
+					break;
+				case RotateFlipType.Rotate90FlipX:
+					p = new Point(y1, x1);
+					s = new Size(h0, w0);
+					break;
+				case RotateFlipType.Rotate180FlipX:
+					p = new Point(x1, cropSize.Height - y2);
+					break;
+				case RotateFlipType.Rotate270FlipX:
+					p = new Point(cropSize.Height - y2, cropSize.Width - x2);
+					s = new Size(h0, w0);
+					break;
+				case RotateFlipType.RotateNoneFlipNone:
+				default:
+					break;
+			}
+
+			var res = new Rect(p.X, p.Y, s.Width, s.Height);
+			return res;
+		}
+
+		private static bool CheckAndRotateTiffAnnotation(this TiffAnnotationItem tai, PageModel pm)
+		{
+			#region границы
+			var b = tai.LrBounds.NormalizeRectangle();
+			var s = pm.RectangleCrop.NormalizeRectangle();
+
+			var dl = b.Left - s.Left;
+			var dt = b.Top - s.Top;
+
+			if (dl < 0 || dt < 0 || b.Right > s.Right || b.Bottom > s.Bottom)//проверка выхода аннотаций за границы кропа
+			{
+				return false;
+			}
+
+			var cropedBounds = new Rect(dl, dt, b.Width, b.Height);//координаты аннотаций после кропа
+			tai.LrBoundsChosen = GetNewTiffAnnotationBounds(pm.RectangleCrop.Size, cropedBounds, pm.RotateFlipType);//координаты аннотаций с учётом поворота/отражения
+			#endregion
+
+			#region вращение/отражение
+			tai.OiAnoDat_AN_NEW_ROTATE_STRUCT_Chosen = new AN_NEW_ROTATE_STRUCT();
+
+			var startRotation = //в момент изменения или создания заметки фиксируем (0 - текущее значение RotationFlipType)
+				tai.OiAnoDat_AN_NEW_ROTATE_STRUCT is null ?
+				RotateFlipType.RotateNoneFlipNone :
+				(RotateFlipType)(tai.OiAnoDat_AN_NEW_ROTATE_STRUCT.Rotation - 1);
+
+			var newRotation = startRotation.Add(pm.RotateFlipType);
+			tai.OiAnoDat_AN_NEW_ROTATE_STRUCT_Chosen.Rotation = (int)newRotation + 1;//записали поворот, который применим при отрисовке сохранённого файла
+			#endregion
+
+			return true;
+		}
+
+		private static void WriteTiffAnnotations(this Tiff output, PageModel pm, TiffAnnotationView tav)
+		{
+			if (pm.HasTiffAnnotations)
+			{
+				var ditasm = new DocumentImageTiffAnnotationsModel();
+
+				foreach (var tam in pm.TiffAnnotations)
+				{
+					var tai = tam.TiffAnnotationItem;
+					var oiGroup = tai.OiGroup;
+
+					var canWrite =
+						tav.FilteringTiffAnnotations == FilteringTiffAnnotationsType.ShowAll ||
+						tav.FilteringTiffAnnotations == FilteringTiffAnnotationsType.ShowCurrentUserOnly &&
+							tav.TiffAnnotationOiGroupCurrentUser == oiGroup ||
+						tav.FilteringTiffAnnotations == FilteringTiffAnnotationsType.ShowGroup &&
+							tav.TiffAnnotationOiGroups is not null && tav.TiffAnnotationOiGroups.Contains(oiGroup);
+
+					if (canWrite && tai.CheckAndRotateTiffAnnotation(pm))
+					{
+						ditasm.TiffAnnotationItems.Add(tam.TiffAnnotationItem);
+					}
+				}
+
+				if (ditasm.TiffAnnotationItems.Count > 0)
+				{
+					var ab = ditasm.GetAnnotationTiffBytes(true);
+					output.SetField(ImageModel.OIAN_MARK_ATTRIBUTES, ab.Length, ab);
+				}
+			}
+		}
+
+		private static void WriteRGBRasterAsTiffDirectory(
+			this Tiff output, PageModel pm, byte[] raster, BitmapSource parameters, int index, bool useMark, string mark, TiffAnnotationView tav)
+		{
+			var width = (int)parameters.Width;
+			var height = (int)parameters.Height;
+			var xRes = (int)parameters.DpiX;
+			var yRes = (int)parameters.DpiY;
+			var numberOfPages = pm.ImageModelParent.PagesChosen.Count();
+
+			output.SetPageTiffTags(index, numberOfPages);
+			output.SetSizeTiffTags(width, height);
+			output.SetResolutionInInchTiffTags(xRes, yRes);
+
+			if (useMark)
+			{
+				output.SetField(TiffTag.IMAGEDESCRIPTION, mark);
+			}
+
+			var toGrayScale =
+				!(pm.HasStamps && pm.StampSaveTypeChosen == ExtraObjectsSaveType.Burn) &&
+				!(pm.HasTiffAnnotations && pm.TiffAnnotationSaveTypeChosen == ExtraObjectsSaveType.Burn) &&
+				(pm.ColorizeTypeChosen != ColorizeType.Colorize || pm.IsBWColorOrigin);
+
+			var keepTiffAnnotations = pm.HasTiffAnnotations && pm.TiffAnnotationSaveTypeChosen == ExtraObjectsSaveType.Keep;
+
+			if (keepTiffAnnotations)
+			{
+				output.WriteTiffAnnotations(pm, tav);
+			}
+
+			if (toGrayScale)
+			{
+				output.Set8bppTiffTags();
+			}
+			else
+			{
+				output.Set24bppTiffTags(pm);
+			}
+
+			output.WriteConvertedSamples(raster, width, height, toGrayScale);
+			output.WriteDirectory();
+		}
+
+		private static byte[] ConvertBitmapToRGBRaster(this BitmapSource bmp)
+		{
+			Rect rect = new Rect(0, 0, bmp.Width, bmp.Height);
+			//BitmapData bmpdata = bmp.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+			byte[] bits = null;//	new byte[bmpdata.Stride * bmpdata.Height];
+					   //Marshal.Copy(bmpdata.Scan0, bits, 0, bits.Length);
+					   //bmp.UnlockBits(bmpdata);
+			return bits;
+		}
+
+		private static byte[] GetRGBByteRasterFromBitmap(
+			this PageModel pm, BitmapSource pageImage, out BitmapSource parameters, TiffAnnotationView tav)
+		{
+			byte[] bits = null;
+			parameters = null;
+
+			//if (pageImage is not null)
+			//{
+			//	using (var pageImageForDraw = new Bitmap(pageImage))//копия базового битмапа
+			//	using (var res = new Bitmap(pm.RectangleCrop.Width, pm.RectangleCrop.Height))//битмап размера кропа
+			//	{
+			//		pageImageForDraw.SetResolution(pageImage.HorizontalResolution, pageImage.VerticalResolution);
+			//		res.FillAndTransformResultBitmapFromPageImageAndTiffAnnotations(pageImageForDraw, pm, tav);
+			//		parameters = new Bitmap(res.Width, res.Height);
+			//		parameters.SetResolution(res.HorizontalResolution, res.VerticalResolution);
+			//		bits = res.ConvertBitmapToRGBRaster();
+			//	}
+			//}
+
+			return bits;
+		}
+
+		private static byte[] GetRGBByteRasterFromPageModel(this PageModel pm, out BitmapSource parameters, TiffAnnotationView tav)
+		{
+			var pageImage =
+				pm.ImageModelParent.SourceType != SourceType.ImagesSource ? pm.BitmapForView :
+				pm.ImageModelParent.ScanPagesInitial[pm.PageNumberInitial];
+
+			return pm.GetRGBByteRasterFromBitmap(pageImage, out parameters, tav);
+		}
+
+		private static void CopyAllTagsExceptTiffAnnotations(Tiff input, Tiff output)
+		{
+			var problemTags = new HashSet<TiffTag>() //таги, наличие которых приводит к сбою
+			{
+				TiffTag.GROUP4OPTIONS,
+				TiffTag.GROUP3OPTIONS,
+				TiffTag.COLORMAP,
+			};
+
+			for (ushort t = ushort.MinValue; t < ushort.MaxValue && t != 32932; ++t)//кроме аннотаций
+			{
+				TiffTag tag = (TiffTag)t;
+
+				if (input.GetField(tag) is FieldValue[] tagValue && !problemTags.Contains(tag))
+				{
+					output.GetTagMethods().SetField(output, tag, tagValue);
+				}
+			}
+
+			int height = input.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
+			output.SetField(TiffTag.ROWSPERSTRIP, height);
+			output.SetField(TiffTag.SOFTWARE, "DocumentImageEditor");
+		}
+
+		private static byte[] RasterToRgbBuffer(this int[] raster)
+		{
+			byte[] buffer = new byte[raster.Length * 3];
+
+			for (int i = 0; i < raster.Length; i++)
+			{
+				Buffer.BlockCopy(raster, i * 4, buffer, i * 3, 3);
+			}
+
+			return buffer;
+		}
+
+		private static byte[] RasterToGrayBuffer(byte[] raster)
+		{
+			byte[] buffer = new byte[raster.Length / 3];
+
+			for (int i = 0; i < buffer.Length; i++)
+			{
+				var r = raster[i * 3];
+				var g = raster[i * 3 + 1];
+				var b = raster[i * 3 + 2];
+				var c = (byte)(255 - (0.3 * r + 0.59 * g + 0.11 * b));//потому что miniswhite!
+
+				buffer[i] = c;
+			}
+
+			return buffer;
+		}
+
+		private static byte[] RasterToBWBuffer(byte[] raster)
+		{
+			byte[] buffer = new byte[raster.Length / 3];
+
+			for (int i = 0; i < buffer.Length; i++)
+			{
+				var r = raster[i * 3];
+				var g = raster[i * 3 + 1];
+				var b = raster[i * 3 + 2];
+
+				var c = (byte)(0.3 * r + 0.59 * g + 0.11 * b);
+				c = c > (byte)127 ? (byte)0 : (byte)255;//потому что miniswhite!
+				buffer[i] = c;
+			}
+
+			return buffer;
+		}
+
+		private static int[] Rotate(int[] buffer, RotateFlipType rotateFlipType, Rect cropSelection, ref int width, ref int height)
+		{
+			int rotatedWidth = (int)cropSelection.Width;
+			int rotatedHeight = (int)cropSelection.Height;
+
+			if (((int)rotateFlipType) % 2 == 1)
+			{
+				int tmp = rotatedWidth;
+				rotatedWidth = rotatedHeight;
+				rotatedHeight = tmp;
+			}
+
+			int[] rotated = new int[rotatedWidth * rotatedHeight];
+
+			for (int h = 0; h < cropSelection.Height; ++h)
+			{
+				for (int w = 0; w < cropSelection.Width; ++w)
+				{
+					int item = buffer[(h + (int)cropSelection.Top) * width + w + (int)cropSelection.Left];
+					int x;
+					int y;
+
+					switch (rotateFlipType)
+					{
+						case RotateFlipType.Rotate90FlipNone://1
+							x = rotatedWidth - h - 1;
+							y = w;
+							break;
+
+						case RotateFlipType.Rotate180FlipNone://2
+							x = rotatedWidth - w - 1;
+							y = rotatedHeight - h - 1;
+							break;
+
+						case RotateFlipType.Rotate270FlipNone://3
+							x = h;
+							y = rotatedHeight - w - 1;
+							break;
+
+						case RotateFlipType.RotateNoneFlipX://4
+							x = rotatedWidth - w - 1;
+							y = h;
+							break;
+
+						case RotateFlipType.Rotate90FlipX://5
+							x = h;
+							y = w;
+							break;
+
+						case RotateFlipType.Rotate180FlipX://6
+							x = w;
+							y = rotatedHeight - h - 1;
+							break;
+
+						case RotateFlipType.Rotate270FlipX://7
+							x = rotatedWidth - h - 1;
+							y = rotatedHeight - w - 1;
+							break;
+
+						case RotateFlipType.RotateNoneFlipNone://0
+						default:
+							x = w;
+							y = h;
+							break;
+					}
+
+					rotated[y * rotatedWidth + x] = item;
+				}
+			}
+
+			width = rotatedWidth;
+			height = rotatedHeight;
+
+			return rotated;
+		}
+
+		//запасной вариант в случае ошибки, связанной с необрабатываемыми тегами
+		private static void CureTiffTagProblems(this Tiff output, PageModel pm, int index, bool useMark, string mark, TiffAnnotationView tav)
+		{
+			var raster = pm.GetRGBByteRasterFromPageModel(out BitmapSource parameters, tav);
+
+			if (raster is null)
+			{
+				return;
+			}
+
+			output.CreateDirectory();//пересоздаём заново
+			var pageIndex = Convert.ToInt16(pm.PageNumberInitial);
+			output.SetDirectory(pageIndex);
+			pm.TiffAnnotationSaveTypeChosen = //в этом случае, если сохраняются заметки, то они прожигаются. иначе файл пишется с ошибками
+				pm.TiffAnnotationSaveTypeChosen == ExtraObjectsSaveType.Keep ?
+				ExtraObjectsSaveType.Burn :
+				pm.TiffAnnotationSaveTypeChosen;
+			output.WriteRGBRasterAsTiffDirectory(pm, raster, parameters, index, useMark, mark, tav);
+		}
+
+		private static void WriteNotMergedTiffPageModelToTiffDirectory(
+			this Tiff output, PageModel pm, int index, bool useMark, string mark, TiffAnnotationView tav, bool testTiffTags = false)
+		{
+			using (MemoryStream ms = new MemoryStream(pm.ImageModelParent.FileBytes))
+			using (Tiff input = Tiff.ClientOpen("InMemory", "r", ms, new TiffStream()))
+			{
+				var keepTiffAnnotations = pm.HasTiffAnnotations && pm.TiffAnnotationSaveTypeChosen == ExtraObjectsSaveType.Keep;
+
+				if (keepTiffAnnotations)
+				{
+					output.WriteTiffAnnotations(pm, tav);
+				}
+
+				var pageIndex = Convert.ToInt16(pm.PageNumberInitial);
+				input.SetDirectory(pageIndex);
+				CopyAllTagsExceptTiffAnnotations(input, output);
+				output.SetPageTiffTags(index, pm.ImageModelParent.PagesChosen.Count());
+
+				if (useMark)
+				{
+					output.SetField(TiffTag.IMAGEDESCRIPTION, mark);
+				}
+
+				int width = input.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
+				int height = input.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
+
+				int[] raster = new int[width * height];
+				input.ReadRGBAImageOriented(width, height, raster, Orientation.TOPLEFT);
+				raster = Rotate(raster, pm.RotateFlipType, pm.RectangleCrop, ref width, ref height);
+				output.SetSizeTiffTags(width, height);
+				byte[] strip = RasterToRgbBuffer(raster);
+
+				if (pm.ColorizeTypeChosen != ColorizeType.Colorize || pm.IsBWColorOrigin)
+				{
+					output.Set8bppTiffTags();
+
+					if (pm.ColorizeTypeChosen == ColorizeType.BW)
+					{
+						strip = RasterToBWBuffer(strip);
+					}
+					else
+					{
+						strip = RasterToGrayBuffer(strip);
+					}
+
+					byte[] buf = new byte[width];
+
+					for (int i = 0; i < height; ++i)
+					{
+						Array.Copy(strip, i * width, buf, 0, width);
+						output.WriteScanline(buf, i);
+					}
+				}
+				else
+				{
+					if (input.GetField(TiffTag.SAMPLESPERPIXEL)[0].ToInt() != 3)
+					{
+						output.Set24bppTiffTags(pm);
+					}
+
+					output.WriteEncodedStrip(0, strip, strip.Length);
+				}
+			}
+
+			if (testTiffTags)//для тестирования проблемных тагов. ошибка не глушится
+			{
+				output.WriteDirectory();
+			}
+			else
+			{
+				try
+				{
+					output.WriteDirectory();
+				}
+				catch //непредсказуемое сочетание тагов, приводящее к ошибке
+				{
+					output.CureTiffTagProblems(pm, index, useMark, mark, tav);
+				}
+			}
+		}
+
+		private static void WritePageModelToTiffDirectory(
+			this Tiff output, PageModel pm, int index, bool useMark, string mark, TiffAnnotationView tav, bool testTiffTags = false)
+		{
+			if (
+				pm.ImageFileFormatOrigin == ImageFileFormat.Tiff && !(pm.HasStamps && pm.StampSaveTypeChosen == ExtraObjectsSaveType.Burn ||
+				pm.HasTiffAnnotations && pm.TiffAnnotationSaveTypeChosen == ExtraObjectsSaveType.Burn))
+			{
+				output.WriteNotMergedTiffPageModelToTiffDirectory(pm, index, useMark, mark, tav, testTiffTags);
+			}
+			else
+			{
+				var raster = pm.GetRGBByteRasterFromPageModel(out BitmapSource parameters, tav);
+
+				if (raster is null)
+				{
+					return;
+				}
+
+				output.WriteRGBRasterAsTiffDirectory(pm, raster, parameters, index, useMark, mark, tav);
+			}
+		}
+
+		private static byte[] GetImageModelTiffBytes(this ImageModel imageModel, bool useMark, string mark, TiffAnnotationView tav, bool testTiffTags = false)
+		{
+			if (!useMark && !imageModel.HasBeenModified)
+			{
+				return imageModel?.FileBytes;
+			}
+
+			var pagesSorted = imageModel?.GetSortedPages().ToList();
+			var index = 0;
+
+			if (pagesSorted?.Count == 0)
+			{
+				return null;
+			}
+
+			using var msOutput = new MemoryStream();
+			using var output = Tiff.ClientOpen("in-memory", "w", msOutput, new TiffStream());
+			foreach (var pm in pagesSorted)
+			{
+				mark = index == 0 ? mark : null;
+				output.WritePageModelToTiffDirectory(pm, index++, useMark, mark, tav, testTiffTags);
+			}
+
+			return msOutput.ToArray();
+		}
+		#endregion
+	}
+}

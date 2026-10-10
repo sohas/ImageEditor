@@ -1,0 +1,296 @@
+﻿using System.Collections.Generic;
+using System.Threading.Tasks;
+using System;
+using System.Drawing;
+using ImageEditorControl.Models;
+using ImageEditorControl.States;
+using ImageEditorControl.Models.TiffAnnotations;
+using ImageEditorControl.Undo;
+
+namespace ImageEditorControl
+{
+	public interface IImageEditorControl
+	{
+		/// <summary>
+		/// событие начала долгой операции с файлом (загрузка, сохранение и т.д.)
+		/// </summary>
+		event FileOperationEventHandler FileOperationStarted;
+		void OnFileOperationStarted(string fileName, string extraFileName, bool success);
+
+		/// <summary>
+		/// событие завершения долгой операции с файлом (загрузка, сохранение и т.д.)
+		/// </summary>
+		event FileOperationEventHandler FileOperationFinished;
+		void OnFileOperationFinished(string fileName, string extraFileName, bool success);
+
+		/// <summary>
+		/// событие создания, добавления, изменения или удаления tiff-заметок
+		/// </summary>
+		event TiffAnnotationEventHandler TiffAnnotationEvent;
+		void OnTiffAnnotationEvent(TiffAnnotationModel tiffAnnotationModel, ModificationType modificationType);
+
+		/// <summary>
+		/// событие установки штампа
+		/// </summary>
+		event SetStampEventHandler SetStamp;
+		void OnSetStamp(PageModel pageModel, Point location, SetStampType setStampType);
+
+		/// <summary>
+		/// событие добавление файла перед заданной страницей
+		/// </summary>
+		event AddExtraFileBeforePageEventHandler AddExtraFileBeforePage;
+		void OnAddExtraFileBeforePage(PageModel pageModel);
+
+		/// <summary>
+		/// событие вызова применения множественных изменений
+		/// </summary>
+		event ApplyChangesEventHandler ApplyChanges;
+		void OnApplyChanges(ApplyChangesState applyChangesState);
+		
+		/// <summary>
+		/// событие смены текущей модели страницы
+		/// </summary>
+		event ChangePageModelEventHandler BeforeChangeCurrentPageModel;
+		void OnBeforeChangeCurrentPageModel();
+
+		/// <summary>
+		/// событие смены текущей модели страницы
+		/// </summary>
+		event ChangePageModelEventHandler AfterChangeCurrentPageModel;
+		void OnAfterChangeCurrentPageModel();
+
+		/// <summary>
+		/// событие смены текущей модели изображения
+		/// </summary>
+		event ChangeImageModelEventHandler BeforeChangeCurrentImageModel;
+		void OnBeforeChangeCurrentImageModel(ChangeType changeType);
+
+		/// <summary>
+		/// событие смены текущей модели изображения
+		/// </summary>
+		event ChangeImageModelEventHandler AfterChangeCurrentImageModel;
+		void OnAfterChangeCurrentImageModel(ChangeType changeType);
+
+		/// <summary>
+		/// событие добавления новой операции undo
+		/// </summary>
+		event RegisterUndoObjectEventHandler RegisterNewUndoObject;
+		void OnRegisterNewUndoObject(ImageModel imageModel, UndoAbstract undoObject);
+
+		///// <summary>
+		///// панель ui параметров сохранения
+		///// </summary>
+		//FlowLayoutPanel SetFlowLayoutPanelSaveToolsOut(Control outerControl);
+
+		///// <summary>
+		///// панель ui параметров отображения
+		///// </summary>
+		//FlowLayoutPanel SetFlowLayoutPanelViewToolsOut(Control outerControl);
+
+		///// <summary>
+		///// информационная панель
+		///// </summary>
+		//FlowLayoutPanel SetFlowLayoutPanelInfoToolsOut(Control outerControl);
+
+		/// <summary>
+		/// текущая загруженная ImageModel
+		/// </summary>
+		ImageModel ImageModelCurrent { get; }
+
+		/// <summary>
+		/// текущая модель страницы
+		/// </summary>
+		PageModel PageModelCurrent { get; }
+
+		/// <summary>
+		/// имя текущего отображаемого файла 
+		/// </summary>
+		string FileNameCurrent { get; }
+
+		/// <summary>
+		/// Обновляет отрисовку текущей страницы
+		/// </summary>
+		void RedrawPage();
+
+		/// <summary>
+		/// по адресу файла создаёт ImageModel и загружает её в контрол
+		/// </summary>
+		/// <param name="filename">полный адрес файла</param>
+		Task LoadFileAsync(string filename);
+
+		/// <summary>
+		/// загружает внешне созданную ImageModel
+		/// </summary>
+		/// <param name="im">ImageModel</param>
+		Task LoadImageModelAsync(ImageModel im);
+
+		/// <summary>
+		/// пересоздаёт текущую ImageModel заново 
+		/// </summary>
+		Task ReloadImageModelAsync();
+
+		/// <summary>
+		/// отменяет все изменения ImageModel (операции Undo) без пересоздания модели
+		/// </summary>
+		void ClearImageModelChanges();
+
+		/// <summary>
+		/// добавляет в текущую модель модели, созданные из других файлов, в том числе из данного (добавляет страницы)
+		/// </summary>
+		/// <param name="extraFileName">полный адрес дополнительного файла</param>
+		/// <param name="pageNamber">номер по порядку страницы данной модели (среди выбранных, начиная с 0), 
+		/// перед которой вставляются страницы из файла. если = -1, то страницы добавляются в конец</param>
+		void AddExtraFileToCurrentImageModelAsync(string extraFileName, int pageNamber = -1);
+
+		/// <summary>
+		/// сохраняет модель в новый файл(в том числе по адресу файла текущей модели) в заданном формате
+		/// </summary>
+		/// <param name = "newFileName" > полный адрес сохранения файла</param>
+		/// <param name = "useMark" > будут ли сохраняться ссылки на документ в архиве</param>
+		/// <param name = "mark" > строка ссылки на документ в архиве</param>
+		/// <param name = "tav" >параметры фильтрации заметок</param>
+		void SaveImageModelToFileAsync(string newFileName, bool useMark, string mark, TiffAnnotationView tav = null);
+
+		/// <summary>
+		/// отображает процесс долгих операций над файлами в прогресс-баре
+		/// </summary>
+		/// <param name="progress">процент от 0 до 100</param>
+		void ReportProcess(int progress);
+
+		/// <summary>
+		/// запускает задачи асинхронно (параллельно или последовательно в порядке записи в списке), отображая прогресс выполнения
+		/// </summary>
+		/// <param name="tasks">список задач</param>
+		/// <param name="isParallel">если true, то задачи выполняются параллельно, иначе одна за другой</param>
+		/// <param name="lastProcess">процесс, который запускается после завершения выполнения всех задач</param>
+		void BatchProcessing(List<Task> tasks, bool isParallel, Action lastProcess = null);
+
+		/// <summary>
+		/// печатает выбранную страницу
+		/// </summary>
+		/// <param name="pm">PageModel страницы</param>
+		/// <param name="fitScale">если true, то печатается на всю страницу, иначе по физическому размеру. 
+		/// если выбрано false, но физический размер больше размера страницы печати, подгоняется под страницу печати</param>
+		void PrintPage(PageModel pm, bool fitScale);
+
+		/// <summary>
+		/// устанавливает количество обрабатываемых файлов (для управления группой файлов через кнопку ApplyTo)
+		/// </summary>
+		/// <param name="filesCount">количество обрабатываемых файлов</param>
+		void SetDocumentsCount(int filesCount);
+
+		/// <summary>
+		/// отписка от всех подписок на события
+		/// </summary>
+		/// <param name="im">модель изображения</param>
+		void UnsubscribeFromEvents(ImageModel im);
+	}
+
+	public delegate void FileOperationEventHandler(object sender, FileOperationEventArgs args);
+
+	public class FileOperationEventArgs(string fileName, string extraFileName, bool success) : EventArgs
+	{
+		public string FileName { get; private set; } = fileName;
+		public string ExtraFileName { get; private set; } = extraFileName;
+		public bool Success { get; private set; } = success;
+	}
+
+	public delegate void TiffAnnotationEventHandler(object sender, TiffAnnotationEventArgs e);
+
+	public class TiffAnnotationEventArgs(TiffAnnotationModel tiffAnnotationModel, ModificationType modificationType) : EventArgs
+	{
+		public TiffAnnotationModel TiffAnnotationModel { get; private set; } = tiffAnnotationModel;
+		public ModificationType ModificationType { get; private set; } = modificationType;
+	}
+
+	public delegate void SetStampEventHandler(object sender, SetStampEventArgs e);
+
+	public class SetStampEventArgs(PageModel pageModel, Point location, SetStampType setStampType) : EventArgs
+	{
+		public PageModel PageModel { get; private set; } = pageModel;
+		public Point Location {	get; private set; } = location;
+		public SetStampType SetStampType { get; private set; } = setStampType;
+	}
+
+	public delegate void AddExtraFileBeforePageEventHandler(object sender, AddExtraFileBeforePageEventArgs e);
+
+	public class AddExtraFileBeforePageEventArgs(PageModel pageModel) : EventArgs
+	{
+		public PageModel PageModel { get; private set; } = pageModel;
+		public SetStampType SetStampType { get; private set; }
+	}
+
+	public delegate void ApplyChangesEventHandler(object sender, ApplyChangesEventArgs e);
+
+	public class ApplyChangesEventArgs(ApplyChangesState applyChangesState) : EventArgs
+	{
+		public ApplyChangesState ApplyChangesState { get; private set; } = applyChangesState;
+	}
+
+	public delegate void ChangePageModelEventHandler(object sender, ChangePageModelEventArgs e);
+
+	public class ChangePageModelEventArgs(PageModel pageModel) : EventArgs
+	{
+		public PageModel PageModel { get; private set; } = pageModel;
+	}
+
+	public delegate void ChangeImageModelEventHandler(object sender, ChangeImageModelEventArgs e);
+
+	public class ChangeImageModelEventArgs(ImageModel imageModel, ChangeType changeType) : EventArgs
+	{
+		public ImageModel ImageModel { get; private set; } = imageModel;
+		public ChangeType ChangeType { get; private set; } = changeType;
+	}
+
+	public delegate void RegisterUndoObjectEventHandler(object sender, RegisterUndoObjectEventArgs e);
+
+	public class RegisterUndoObjectEventArgs(ImageModel imageModel, UndoAbstract undoObject) : EventArgs
+	{
+		public ImageModel ImageModel { get; private set; } = imageModel;
+		public UndoAbstract UndoObject { get; private set; } = undoObject;
+	}
+
+	/// <summary>
+	/// Класс параметров отображения заметок
+	/// </summary>
+	public class TiffAnnotationView
+	{
+		public FilteringTiffAnnotationsType FilteringTiffAnnotations { get; set; } = FilteringTiffAnnotationsType.ShowAll;
+		public string TiffAnnotationOiGroupCurrentUser { get; set; } = null;
+		public HashSet<string> TiffAnnotationOiGroups { get; set; } = null;
+
+		public static TiffAnnotationView NotFiltering => new TiffAnnotationView();
+	}
+
+	/// <summary>
+	/// Перечисление типов обображения заметок
+	/// </summary>
+	public enum FilteringTiffAnnotationsType
+	{
+		HideAll = 0,
+		ShowCurrentUserOnly = 1,
+		ShowGroup = 2,
+		ShowAll = 3,
+	}
+
+	/// <summary>
+	/// Перечисление типов событий изменения
+	/// </summary>
+	public enum ModificationType
+	{
+		JustNotify,
+		Add,
+		Edit,
+		Remove,
+	}
+
+	/// <summary>
+	/// Перечисление типов изменения модели изображения
+	/// </summary>
+	public enum ChangeType
+	{
+		New,
+		Reset,
+		ClearChanges,
+	}
+}

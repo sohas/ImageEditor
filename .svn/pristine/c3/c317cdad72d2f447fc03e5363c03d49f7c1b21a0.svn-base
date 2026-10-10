@@ -1,0 +1,84 @@
+﻿namespace ImageEditorControl.Tools
+{
+	/// <summary>
+	/// Перечисление типов свойств, об изменении которых уведомляется
+	/// </summary>
+	public enum NotifiedPropertyType
+	{
+		IsSelectedSingle,
+		IsSelectedMultiple,
+		BitmapThumbnail,
+		BitmapForView,
+		PagesChosen,
+		IsDeleted,
+		PageNumberCurrent,
+		PagesAll,
+		DocumentNameChosen,
+		PageNumberDisplayedSimple,
+	}
+
+	/// <summary>
+	/// Перечисление типов обображения заметок
+	/// </summary>
+	public enum FilteringTiffAnnotationsType
+	{
+		HideAll = 0,
+		ShowCurrentUserOnly = 1,
+		ShowGroup = 2,
+		ShowAll = 3,
+	}
+
+	/// <summary>
+	/// Перечисление типов событий изменения
+	/// </summary>
+	public enum ModificationType
+	{
+		JustNotify,
+		Add,
+		Edit,
+		Remove,
+	}
+
+	/// <summary>
+	/// Перечисление типов изменения модели изображения
+	/// </summary>
+	public enum ChangeType
+	{
+		New,
+		Reset,
+		ClearChanges,
+	}
+
+	[Flags]
+	public enum ControlSettings
+	{
+		Primitive = 0,
+		CanSelectFragment = 1,
+		ShowUndoRedo = 2,
+		CanScale = 4,
+		CanChangeFileName = 8,
+		UseViewTools = 16,
+		UseSaveTools = 32,
+		UseInfoTools = 64,
+		CanShiftPages = 128,
+		CanDeletePages = 256,
+		CanAddExtraFiles = 512,
+		CanSetStamps = 1024,
+		CanSetTiffAnnotations = 2048,
+		CanCrop = 4096,
+		CanFlipPage = 8192,
+		SavePageView = 16384,
+		CanSelectPagesMultiple = 32768,
+		ShowSaveStamps = 65536,
+		All = CanSelectFragment | ShowUndoRedo | CanScale | CanChangeFileName | UseSaveTools | UseViewTools |
+			UseInfoTools | CanShiftPages | CanDeletePages | CanAddExtraFiles | CanSetStamps | CanSetTiffAnnotations |
+			CanCrop | CanFlipPage | SavePageView | CanSelectPagesMultiple | ShowSaveStamps,
+	}
+
+	public enum ImageCacheSettings
+	{
+		NoCache = 0,
+		InternalCache = 1,
+		ExternalCache = 2,
+	}
+}

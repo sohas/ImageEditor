@@ -1,0 +1,176 @@
+﻿using ImageEditorControl.Models;
+using ImageEditorControl.Models.TiffAnnotations;
+using ImageEditorControl.States;
+using ImageEditorControl.Tools;
+using ImageEditorControl.Undo;
+using System.ComponentModel;
+using System.Windows;
+using System.Windows.Controls;
+
+namespace ImageEditorControl.UIs
+{
+	public class ImageEditor : UserControl
+	{
+		private static readonly ComponentResourceManager resources = new ComponentResourceManager(typeof(ImageEditor));
+		private readonly static string documentImageEditorControlName = resources.GetString("formName");
+		private readonly static string deletePageName = resources.GetString("deletePageName");
+		private readonly static string colorizeName = resources.GetString("colorizeName");
+		private readonly static string bwName = resources.GetString("bwName");
+		private readonly static string grayName = resources.GetString("grayName");
+		private readonly static string rotateRName = resources.GetString("rotateRName");
+		private readonly static string rotateLName = resources.GetString("rotateLName");
+		private readonly static string flipXName = resources.GetString("flipXName");
+		private readonly static string flipYName = resources.GetString("flipYName");
+		private readonly static string cropName = resources.GetString("cropName");
+		private readonly static string uncropName = resources.GetString("uncropName");
+		private readonly static string fitToSelectionName = resources.GetString("fitToSelectionName");
+		private readonly static string hasNotesName = resources.GetString("hasNotesName");
+		private readonly static string setStampOnLocationName = resources.GetString("setStampOnLocationName");
+		private readonly static string setStampFullImageName = resources.GetString("setStampFullImageName");
+		private readonly static string setStampFitToImageName = resources.GetString("setStampFitToImageName");
+		private readonly static string removeStampName = resources.GetString("removeStampName");
+		private readonly static string removeAnnotationName = resources.GetString("removeAnnotationName");
+		private readonly static string editAnnotationName = resources.GetString("editAnnotationName");
+		private readonly static string setMarkerAnnotationName = resources.GetString("setMarkerAnnotationName");
+		private readonly static string setFrameAnnotationName = resources.GetString("setFrameAnnotationName");
+		private readonly static string setSimpleTextAnnotationName = resources.GetString("setSimpleTextAnnotationName");
+		private readonly static string setTextWithBackgroundAnnotationName = resources.GetString("setTextWithBackgroundAnnotationName");
+		private readonly static string keepAnnotationsName = resources.GetString("keepAnnotationsName");
+		private readonly static string loseAnnotationsName = resources.GetString("loseAnnotationsName");
+		private readonly static string burnAnnotationsName = resources.GetString("burnAnnotationsName");
+		private readonly static string physicalSizeName = resources.GetString("physicalSizeName");
+		private readonly static string fitToWindowName = resources.GetString("fitToWindowName");
+		private readonly static string fitToHeightName = resources.GetString("fitToHeightName");
+		private readonly static string fitToWidthName = resources.GetString("fitToWidthName");
+		private readonly static string loseStampsName = resources.GetString("loseStampsName");
+		private readonly static string burnStampsName = resources.GetString("burnStampsName");
+		private readonly static string shiftPageDownName = resources.GetString("shiftPageDownName");
+		private readonly static string shiftPageUpName = resources.GetString("shiftPageUpName");
+		private readonly static string addExtraFileBeforeThisPageName = resources.GetString("addExtraFileBeforeThisPageName");
+		private readonly static string documentNameName = resources.GetString("documentNameName");
+		private readonly static string changeDocumentNameName = resources.GetString("changeDocumentNameName");
+		private readonly static string attentionName = resources.GetString("attentionName");
+		private readonly static string cannotSaveName = resources.GetString("cannotSaveName");
+		private readonly static string savePlainImageName = resources.GetString("savePlainImageName");
+		private readonly static string fileExistsName = resources.GetString("fileExistsName");
+		private readonly static string applyToName = resources.GetString("applyToName");
+		private readonly static string documentTitleName = resources.GetString("documentTitleName");
+		private readonly static string pageTitleName = resources.GetString("pageTitleName");
+		private readonly static string annotationAddedName = resources.GetString("annotationAddedName");
+		private readonly static string annotationEditedName = resources.GetString("annotationEditedName");
+		private readonly static string annotationRemovedName = resources.GetString("annotationRemovedName");
+		private readonly static string extraModelAddedName = resources.GetString("extraModelAddedName");
+		private readonly static string documentNameChangedName = resources.GetString("documentNameChangedName");
+		private readonly static string pageDeletedName = resources.GetString("pageDeletedName");
+		private readonly static string pagesDeletedMultipleName = resources.GetString("pagesDeletedMultipleName");
+		private readonly static string pageRestoredName = resources.GetString("pageRestoredName");
+		private readonly static string pagesRestoredMultipleName = resources.GetString("pagesRestoredMultipleName");
+		private readonly static string pageShiftedName = resources.GetString("pageShiftedName");
+		private readonly static string stampAddedName = resources.GetString("stampAddedName");
+		private readonly static string stampEditedName = resources.GetString("stampEditedName");
+		private readonly static string stampRemovedName = resources.GetString("stampRemovedName");
+		private readonly static string undoName = resources.GetString("undoName");
+		private readonly static string redoName = resources.GetString("redoName");
+		private readonly static string zoomInName = resources.GetString("zoomInName");
+		private readonly static string zoomOutName = resources.GetString("zoomOutName");
+		private readonly static string previousPageName = resources.GetString("previousPageName");
+		private readonly static string nextPageName = resources.GetString("nextPageName");
+		private readonly static string cannotAddNoImageName = resources.GetString("cannotAddNoImageName");
+		private readonly static string selectFragmentName = resources.GetString("selectFragmentName");
+		private readonly static string cannotWriteToDirectoryName = resources.GetString("cannotWriteToDirectoryName");
+		private readonly static string showThumbnailsName = resources.GetString("showThumbnailsName");
+		private readonly static string addToSelectionMultipleName = resources.GetString("addToSelectionMultipleName");
+		private readonly static string removeFromSelectionMultipleName = resources.GetString("removeFromSelectionMultipleName");
+		private readonly static string copyPageTextName = resources.GetString("copyPageTextName");
+
+		private ILogger logger;
+
+		private ControlSettings controlSettings = ControlSettings.All;
+		private ImageCacheSettings imageCacheSettings = ImageCacheSettings.InternalCache;
+
+		public ControlSettings EditorControlSettings => controlSettings;
+		public ImageCacheSettings ImageCacheSettings => imageCacheSettings;
+
+		protected bool useViewTools = false;
+		protected bool useSaveTools = false;
+		protected bool useInfoTools = false;
+
+		protected readonly WrapPanel flowLayoutPanelSaveTools = new WrapPanel();
+		protected readonly WrapPanel flowLayoutPanelViewTools = new WrapPanel();
+		protected readonly WrapPanel flowLayoutPanelInfoTools = new WrapPanel();
+
+		public static string GetAnotationTypeName(ExtraObjectsSaveType annotationSaveType)
+		{
+			return annotationSaveType switch
+			{
+				ExtraObjectsSaveType.Lose => loseAnnotationsName,
+				ExtraObjectsSaveType.Burn => burnAnnotationsName,
+				_ => keepAnnotationsName,
+			};
+		}
+
+		public static string GetStampTypeName(ExtraObjectsSaveType annotationSaveType)
+		{
+			return annotationSaveType switch
+			{
+				ExtraObjectsSaveType.Lose => loseStampsName,
+				_ => burnStampsName,
+			};
+		}
+
+		public static string GetColorizeTypeName(ColorizeType colorizeType)
+		{
+			return colorizeType switch
+			{
+				ColorizeType.Gray => grayName,
+				ColorizeType.BW => bwName,
+				_ => colorizeName,
+			};
+		}
+
+		public static string GetDrawSizeTypeName(DrawSizeType drawSizeType, double scale)
+		{
+			return drawSizeType switch
+			{
+				DrawSizeType.PhysicalSize => physicalSizeName,
+				DrawSizeType.FitToWindow => fitToWindowName,
+				DrawSizeType.FitToHeight => fitToHeightName,
+				DrawSizeType.FitToWidth => fitToWidthName,
+				_ => $" {Math.Round(scale * 100)}%",
+			};
+		}
+
+		public static string GetImageFileFormatName(ImageFileFormat imageFileFormat) =>
+			imageFileFormat == ImageFileFormat.Unknown ? "?" : $"{imageFileFormat}";
+
+		public ImageEditor()
+		{
+			var t = Resource.ImageDropDownArrow;
+		}
+
+		public void SetControlSettings(ControlSettings settings)
+		{
+			controlSettings = settings;
+		}
+
+		public void SetImageCacheSettings(ImageCacheSettings settings)
+		{
+			imageCacheSettings = settings;
+		}
+
+		public void SetLogger(ILogger logger)
+		{
+			this.logger = logger;
+		}
+
+		public WrapPanel SetFlowLayoutPanelSaveToolsOut(FrameworkElement element) =>
+			flowLayoutPanelSaveTools.SetPanelOut(element, ref useSaveTools);
+
+		public WrapPanel SetFlowLayoutPanelViewToolsOut(FrameworkElement element) =>
+			flowLayoutPanelViewTools.SetPanelOut(element, ref useViewTools);
+
+		public WrapPanel SetFlowLayoutPanelInfoToolsOut(FrameworkElement element) =>
+			flowLayoutPanelInfoTools.SetPanelOut(element, ref useInfoTools);
+
+	}
+}
